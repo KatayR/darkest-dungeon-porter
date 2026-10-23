@@ -72,3 +72,6 @@ Project rules learned from mistakes made during the port.
 
 ## Release notes
 - A release's notes hold only what is new in it and the signing certificate's SHA-256, nothing else: no intro line ("Runs your own GOG or Steam copy…"), no install steps, no test list, no README pointer. Those belong in the README; copied into each release, they repeat down the whole Releases page.
+
+## Audio latency
+- Check where a stream lands before tuning its buffer: `dumpsys media.audio_flinger` names the output thread and gives each track's latency. FMOD's stream was on the deep-buffer output (233 ms) and setting `LOW_LATENCY` changed nothing, because AAudio's legacy path never gives a write-driven stream a fast track (`AUDIO_OUTPUT_FLAG_FAST denied by client ... TRANSFER_SYNC`). Only a data-callback stream gets one.

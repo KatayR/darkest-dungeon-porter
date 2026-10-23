@@ -958,3 +958,34 @@ Goal: Android's on-screen keyboard opens while the game wants text (naming the h
   - `showSoftInput` was ignored when the view had lost focus; the view now takes focus right before.
   - Android outlined the focused game view in green after a key press; the focus highlight is off for it.
 - **Panning:** the keyboard covers the lower half of the screen, and the save-name field sits in the slot row clicked before the mode dialog, not where the last click was. ddview keeps the left clicks of the last 30 s. When the keyboard opens, the game slides up until the lowest of them is just above the keyboard, but never so far that the last click leaves the screen. The bars the keyboard brings overlay the game instead of moving it (`setDecorFitsSystemWindows(false)`). Confirmed by hand in slots 1–3.
+
+### Audio latency (2026-10-23)
+Reported: "there is lag on audio". Measured on the Galaxy A34 (0.4.0 debug, game running, `dumpsys media.audio_flinger`): FMOD's track has **404 ms** latency, from two delays stacked:
+- **Deep-buffer output, ~233 ms.** With `AAUDIO_PERFORMANCE_MODE_NONE` and no usage, the stream lands on `AudioOut_15` (HAL frame count 2048, threadloop write latency 233 ms), the output meant for music playback. The cinematics' OpenSL track is on the primary output (FastMixer, 32 ms; track latency 66 ms).
+- **The shim's own queue, ~170–213 ms.** FMOD asks for a 10240-frame buffer (213 ms). The shim makes that the AAudio buffer size, and FMOD keeps it nearly full (`FrmRdy 8192`).
+
+**Plan:**
+- [x] `open_stream`: `AAUDIO_USAGE_GAME` and `AAUDIO_PERFORMANCE_MODE_LOW_LATENCY`, so the stream goes to the primary output instead of deep buffer.
+- [x] Keep FMOD's 10240 frames as the capacity, but start the buffer size (what `avail_update` reports and `writei` fills) at 2 periods (2048 frames, 43 ms).
+- [x] ~~If AAudio counts underruns (`AAudioStream_getXRunCount`)~~ (replaced by the shim's own count, below), grow the buffer size by one period, up to the capacity, and log it. The emulated FMOD mixer's timing is unknown on slower phones (OnePlus 5).
+- [x] The start threshold (FMOD sets 10240) is capped at the buffer size, or a smaller buffer would never reach it.
+- [ ] **Verify on the A34:** the track's output thread and latency in `dumpsys`, underruns (AudioFlinger and the shim's log) over title, town and a dungeon; then by ear (manual: does sound follow clicks/attacks closely, any crackle).
+
+**First try (usage GAME + LOW_LATENCY, write-driven): only half works.** The track is still on `AudioOut_15`, now at 304 ms; the smaller queue took the 100 ms. AAudio opened on its legacy path (`got Legacy ... perf = NO, burst = 3413`), and AudioTrack logged `AUDIO_OUTPUT_FLAG_FAST denied by client, not shared buffer and transfer = TRANSFER_SYNC`. A legacy AAudio stream fed by `AAudioStream_write` is never a fast track; only one with a data callback is (AOSP `AudioStreamTrack::open`). Without the fast flag, this phone's policy puts it on deep buffer again. The cinematics' OpenSL track is callback-driven and so gets the primary output.
+
+**Re-plan: a callback stream behind a ring buffer.**
+- [x] `open_stream` sets a data callback. The shim keeps its own ring of FMOD's buffer (10240 frames): `writei` copies into it, the callback copies out and pads with silence when it runs dry.
+- [x] Frames written and read are the shim's own counters (one writer, FMOD's thread, and one reader, the callback; atomics, no locks in the callback). `avail_update` and the start threshold use them.
+- [x] What FMOD may queue (`buffer_size`) starts at 2 periods. A callback that finds the ring short while running counts an underrun; `writei` then grows `buffer_size` by a period (as planned, but counting the shim's underruns instead of AAudio's).
+- [x] A blocking `writei` on a full ring sleeps a few ms and tries again (FMOD opens non-blocking, so this path is for completeness).
+- [x] `drop` pauses and flushes the stream, then empties the ring.
+- [x] A disconnect (headphones) shows up as the stream's state; `writei` reopens it there, as now. Writes are never made from the callback.
+- [x] Verify as planned. Expected: the primary output's FastMixer (32 ms) plus 21–43 ms of ring, about 70 ms in all, like the cinematics' 66 ms. Cost: the fast mixer wakes every 5.3 ms while the game plays.
+
+**Review (Galaxy A34, debug build, intro cinematic and title, 1.5 min):**
+- AAudio now gives a fast track (`got Legacy ... perf = LL, burst = 256`; `AUDIO_OUTPUT_FLAG_FAST successful`). FMOD's track is `F3` on the primary output `AudioOut_1D` (FastMixer, 32 ms).
+- AudioTrack's own buffer came as 2048 frames (track latency 74.67 ms). The shim now sets it to two bursts (512), and the track latency is **42.67 ms**. The ring adds 1024–2048 frames (21–43 ms) on top: about **65–85 ms** from FMOD to the speaker, down from 404 ms.
+- No ring underruns (FMOD still queues 2048), 0 AudioFlinger underruns, steady 60 FPS.
+- [ ] **Manual:** by ear in town and in a dungeon (sound follows clicks and attacks closely, no crackle), and that `logcat -s ddaudio` shows few or no `underruns, FMOD now queues` lines after a long session. The queue only grows, so frequent stalls would bring latency back up; if they do, rethink the growth.
+- [ ] **Manual:** headphones in and out (now goes through `check_stream`, also from `avail_update`).
+- [ ] Not tested: the OnePlus 5 (slower CPU, the most likely to grow the queue).

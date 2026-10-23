@@ -2,15 +2,22 @@
 // (libddhost). Its SONAME is libasound.so.2, the name box64 opens for the game's x86_64 FMOD, which
 // looks up exactly the snd_* functions below with dlsym. One playback device, "default"; no capture.
 // - hw_params/sw_params are our own small structs (FMOD allocates them with the *_sizeof sizes).
-// - snd_pcm_hw_params() opens the AAudio stream; writei() writes to it (blocking unless nonblock),
-//   starting it once start_threshold frames are queued.
-// - There are no xruns: on an underrun AAudio plays silence and carries on.
+// - snd_pcm_hw_params() opens the AAudio stream; writei() queues into a ring (blocking unless nonblock),
+//   starting the stream once start_threshold frames are queued. AAudio's data callback plays the ring.
+// - The callback is what makes AAudio's legacy path give a fast track: a stream fed by AAudioStream_write
+//   is never one, and lands on the deep-buffer output, 233 ms behind on the Galaxy A34.
+// - The ring holds FMOD's whole buffer (213 ms), but FMOD may queue only two periods of it at first; each
+//   time the callback finds the ring short, that grows by a period (tune_buffer).
+// - There are no xruns: on an underrun the callback plays silence and carries on.
 // - A stream lost to a route change (headphones) is reopened with the same settings.
 #include <aaudio/AAudio.h>
 #include <android/log.h>
 #include <errno.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_INFO, "ddaudio", __VA_ARGS__)
 
@@ -37,7 +44,11 @@ typedef struct {
     snd_pcm_hw_params_t hw;
     snd_pcm_sw_params_t sw;
     AAudioStream *stream;
-    int nonblock, state, frame_bytes, writes_logged;
+    char *ring;                     // hw.buffer frames
+    _Atomic uint64_t written, read; // frames into and out of the ring: FMOD's thread writes, the callback reads
+    atomic_int underruns;           // callbacks that found the ring short
+    snd_pcm_uframes_t buffer_size;  // what FMOD may queue, at most hw.buffer
+    int nonblock, state, frame_bytes, writes_logged, underruns_seen;
 } snd_pcm_t;
 
 static snd_pcm_uframes_t clamp(snd_pcm_uframes_t v, snd_pcm_uframes_t lo, snd_pcm_uframes_t hi) {
@@ -81,6 +92,41 @@ const char *snd_strerror(int err) {
     return strerror(err < 0 ? -err : err);
 }
 
+// ---- the ring ----
+static uint64_t queued(snd_pcm_t *pcm) {
+    return atomic_load_explicit(&pcm->written, memory_order_relaxed) - atomic_load_explicit(&pcm->read, memory_order_acquire);
+}
+
+// copies n frames between buf and the ring at frame pos, which wraps at hw.buffer
+static void ring_copy(snd_pcm_t *pcm, uint64_t pos, char *buf, uint64_t n, int to_ring) {
+    uint64_t at = pos % pcm->hw.buffer, first = n < pcm->hw.buffer - at ? n : pcm->hw.buffer - at;
+    size_t fb = (size_t)pcm->frame_bytes;
+    char *ring = pcm->ring + at * fb;
+    if (to_ring) {
+        memcpy(ring, buf, first * fb);
+        memcpy(pcm->ring, buf + first * fb, (n - first) * fb);
+    } else {
+        memcpy(buf, ring, first * fb);
+        memcpy(buf + first * fb, pcm->ring, (n - first) * fb);
+    }
+}
+
+// AAudio's callback thread: plays what is queued, then silence
+static aaudio_data_callback_result_t play(AAudioStream *stream, void *user, void *out, int32_t frames) {
+    (void)stream;
+    snd_pcm_t *pcm = user;
+    uint64_t read = atomic_load_explicit(&pcm->read, memory_order_relaxed);
+    uint64_t have = atomic_load_explicit(&pcm->written, memory_order_acquire) - read;
+    uint64_t n = have < (uint64_t)frames ? have : (uint64_t)frames;
+    ring_copy(pcm, read, out, n, 0);
+    atomic_store_explicit(&pcm->read, read + n, memory_order_release);
+    if (n < (uint64_t)frames) {
+        memset((char *)out + n * (size_t)pcm->frame_bytes, 0, ((uint64_t)frames - n) * (size_t)pcm->frame_bytes);
+        atomic_fetch_add_explicit(&pcm->underruns, 1, memory_order_relaxed);
+    }
+    return AAUDIO_CALLBACK_RESULT_CONTINUE;
+}
+
 // ---- the AAudio stream ----
 static void close_stream(snd_pcm_t *pcm) {
     if (pcm->stream)
@@ -94,11 +140,12 @@ static int open_stream(snd_pcm_t *pcm) {
         return -ENODEV;
     AAudioStreamBuilder_setDirection(b, AAUDIO_DIRECTION_OUTPUT);
     AAudioStreamBuilder_setSharingMode(b, AAUDIO_SHARING_MODE_SHARED);
-    AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_NONE);
+    AAudioStreamBuilder_setUsage(b, AAUDIO_USAGE_GAME);
+    AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
     AAudioStreamBuilder_setFormat(b, pcm->hw.format == FORMAT_FLOAT_LE ? AAUDIO_FORMAT_PCM_FLOAT : AAUDIO_FORMAT_PCM_I16);
     AAudioStreamBuilder_setChannelCount(b, pcm->hw.channels);
     AAudioStreamBuilder_setSampleRate(b, pcm->hw.rate);
-    AAudioStreamBuilder_setBufferCapacityInFrames(b, (int32_t)pcm->hw.buffer);
+    AAudioStreamBuilder_setDataCallback(b, play, pcm);
     aaudio_result_t r = AAudioStreamBuilder_openStream(b, &pcm->stream);
     AAudioStreamBuilder_delete(b);
     if (r != AAUDIO_OK) {
@@ -106,12 +153,13 @@ static int open_stream(snd_pcm_t *pcm) {
         pcm->stream = NULL;
         return -ENODEV;
     }
-    AAudioStream_setBufferSizeInFrames(pcm->stream, (int32_t)pcm->hw.buffer);
-    pcm->frame_bytes = pcm->hw.channels * (pcm->hw.format == FORMAT_FLOAT_LE ? 4 : 2);
-    LOG("stream: %s %d ch %d Hz, buffer %d (asked %lu, period %lu), burst %d, start at %lu",
+    // AudioTrack's own buffer comes as 2048 frames (43 ms); the callback only copies, so two bursts do
+    AAudioStream_setBufferSizeInFrames(pcm->stream, 2 * AAudioStream_getFramesPerBurst(pcm->stream));
+    LOG("stream: %s %d ch %d Hz, %s, burst %d, buffer %d; ring %lu, FMOD queues %lu (period %lu), start at %lu",
         pcm->hw.format == FORMAT_FLOAT_LE ? "float" : "s16", pcm->hw.channels, AAudioStream_getSampleRate(pcm->stream),
-        AAudioStream_getBufferSizeInFrames(pcm->stream), pcm->hw.buffer, pcm->hw.period,
-        AAudioStream_getFramesPerBurst(pcm->stream), pcm->sw.start_threshold);
+        AAudioStream_getPerformanceMode(pcm->stream) == AAUDIO_PERFORMANCE_MODE_LOW_LATENCY ? "low latency" : "not low latency",
+        AAudioStream_getFramesPerBurst(pcm->stream), AAudioStream_getBufferSizeInFrames(pcm->stream),
+        pcm->hw.buffer, pcm->buffer_size, pcm->hw.period, pcm->sw.start_threshold);
     return 0;
 }
 
@@ -125,6 +173,18 @@ static int start_stream(snd_pcm_t *pcm) {
     return 0;
 }
 
+// underruns since the last write grow what FMOD may queue by a period, up to the ring
+static void tune_buffer(snd_pcm_t *pcm) {
+    int underruns = atomic_load_explicit(&pcm->underruns, memory_order_relaxed);
+    if (underruns == pcm->underruns_seen)
+        return;
+    pcm->underruns_seen = underruns;
+    if (pcm->buffer_size < pcm->hw.buffer) {
+        pcm->buffer_size = clamp(pcm->buffer_size + pcm->hw.period, 0, pcm->hw.buffer);
+        LOG("%d underruns, FMOD now queues %lu", underruns, pcm->buffer_size);
+    }
+}
+
 // a stream lost to a route change: open a new one on the new route
 static int reopen_stream(snd_pcm_t *pcm) {
     LOG("stream disconnected, reopening");
@@ -135,6 +195,14 @@ static int reopen_stream(snd_pcm_t *pcm) {
         return -EIO;
     pcm->state = STATE_PREPARED;
     return running ? start_stream(pcm) : 0;
+}
+
+static int check_stream(snd_pcm_t *pcm) {
+    if (!pcm->stream)
+        return -EBADFD;
+    if (AAudioStream_getState(pcm->stream) == AAUDIO_STREAM_STATE_DISCONNECTED && reopen_stream(pcm) < 0)
+        return -EIO;
+    return 0;
 }
 
 // ---- pcm ----
@@ -155,6 +223,7 @@ int snd_pcm_open(snd_pcm_t **out, const char *name, int stream, int mode) {
 int snd_pcm_close(snd_pcm_t *pcm) {
     LOG("close");
     close_stream(pcm);
+    free(pcm->ring);
     free(pcm);
     return 0;
 }
@@ -224,6 +293,14 @@ int snd_pcm_hw_params_set_buffer_size_near(snd_pcm_t *pcm, snd_pcm_hw_params_t *
 int snd_pcm_hw_params(snd_pcm_t *pcm, snd_pcm_hw_params_t *p) {
     close_stream(pcm);
     pcm->hw = *p;
+    pcm->frame_bytes = p->channels * (p->format == FORMAT_FLOAT_LE ? 4 : 2);
+    free(pcm->ring);
+    pcm->ring = malloc(p->buffer * (size_t)pcm->frame_bytes);
+    if (!pcm->ring)
+        return -ENOMEM;
+    pcm->written = pcm->read = 0;
+    pcm->underruns = pcm->underruns_seen = 0;
+    pcm->buffer_size = clamp(2 * p->period, 0, p->buffer);
     pcm->state = STATE_SETUP;
     int r = open_stream(pcm);
     if (r < 0)
@@ -288,6 +365,7 @@ int snd_pcm_drop(snd_pcm_t *pcm) {
         AAudioStream_waitForStateChange(pcm->stream, AAUDIO_STREAM_STATE_PAUSING, &s, 100000000);
         AAudioStream_requestFlush(pcm->stream);
     }
+    atomic_store_explicit(&pcm->read, atomic_load_explicit(&pcm->written, memory_order_relaxed), memory_order_release);
     pcm->state = STATE_SETUP;
     return 0;
 }
@@ -297,48 +375,42 @@ int snd_pcm_state(snd_pcm_t *pcm) {
 }
 
 snd_pcm_sframes_t snd_pcm_avail_update(snd_pcm_t *pcm) {
-    if (!pcm->stream)
-        return -EBADFD;
-    int64_t queued = AAudioStream_getFramesWritten(pcm->stream) - AAudioStream_getFramesRead(pcm->stream);
-    int64_t size = AAudioStream_getBufferSizeInFrames(pcm->stream);
-    return (snd_pcm_sframes_t)(queued < 0 ? size : queued > size ? 0 : size - queued);
+    int r = check_stream(pcm);
+    if (r < 0)
+        return r;
+    uint64_t q = queued(pcm);
+    return (snd_pcm_sframes_t)(q >= pcm->buffer_size ? 0 : pcm->buffer_size - q);
 }
 
 snd_pcm_sframes_t snd_pcm_writei(snd_pcm_t *pcm, const void *buf, snd_pcm_uframes_t frames) {
-    if (!pcm->stream)
-        return -EBADFD;
+    int r = check_stream(pcm);
+    if (r < 0)
+        return r;
+    tune_buffer(pcm);
     if (pcm->writes_logged < 3) {
         pcm->writes_logged++;
         LOG("write %lu frames, %ld free%s", frames, snd_pcm_avail_update(pcm), pcm->nonblock ? " (nonblock)" : "");
     }
     const char *data = buf;
     snd_pcm_uframes_t done = 0;
-    int reopened = 0;
     while (done < frames) {
-        // before the start, only fill what fits: a blocking write would wait for playback that never begins
-        int64_t timeout = pcm->state == STATE_RUNNING && !pcm->nonblock ? 1000000000 : 0;
-        aaudio_result_t r = AAudioStream_write(pcm->stream, data + done * pcm->frame_bytes, (int32_t)(frames - done), timeout);
-        if (r == AAUDIO_ERROR_DISCONNECTED && !reopened) {
-            reopened = 1;
-            if (reopen_stream(pcm) < 0)
-                return -EIO;
-            continue;
+        uint64_t q = queued(pcm), n = q < pcm->buffer_size ? pcm->buffer_size - q : 0;
+        if (n > frames - done)
+            n = frames - done;
+        uint64_t written = atomic_load_explicit(&pcm->written, memory_order_relaxed);
+        ring_copy(pcm, written, (char *)data + done * pcm->frame_bytes, n, 1);
+        atomic_store_explicit(&pcm->written, written + n, memory_order_release);
+        done += n;
+        // FMOD's start threshold is its whole buffer, more than it may queue here: start once that is full
+        if (pcm->state != STATE_RUNNING && (q + n >= pcm->sw.start_threshold || q + n >= pcm->buffer_size)) {
+            int s = start_stream(pcm);
+            if (s < 0)
+                return done ? (snd_pcm_sframes_t)done : s;
         }
-        if (r < 0) {
-            LOG("write failed: %s", AAudio_convertResultToText(r));
-            return done ? (snd_pcm_sframes_t)done : -EIO;
-        }
-        done += (snd_pcm_uframes_t)r;
-        if (pcm->state != STATE_RUNNING) {
-            int64_t queued = AAudioStream_getFramesWritten(pcm->stream);
-            if ((snd_pcm_uframes_t)queued >= pcm->sw.start_threshold || done < frames) {
-                int s = start_stream(pcm);
-                if (s < 0)
-                    return done ? (snd_pcm_sframes_t)done : s;
-            }
-        } else if (pcm->nonblock) {
+        if (done == frames || pcm->nonblock || AAudioStream_getState(pcm->stream) == AAUDIO_STREAM_STATE_DISCONNECTED)
             break;
-        }
+        // blocking and full: wait for the callback to make room
+        nanosleep(&(struct timespec){ 0, 2000000 }, NULL);
     }
     if (done == 0 && frames > 0)
         return -EAGAIN;
