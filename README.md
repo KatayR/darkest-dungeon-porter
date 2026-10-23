@@ -37,9 +37,6 @@ Other devices may work. Reports are welcome.
      1. Start Steam and log in to the account that owns Darkest Dungeon.
      2. Download `get-steam-game.bat` from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases) (or [from the repo](port/steam/get-steam-game.bat)) and double-click it.
         - It asks the running Steam to download the game's Linux files (and the DLCs you own) to Steam's `steamapps\content` folder, then packs what the phone needs into `darkest-dungeon-steam.zip` next to the bat.
-        - It is a plain batch file, so you can read what it does first. It uses only tools built into Windows.
-        - It needs about 5 GB free and takes a few minutes, mostly Steam's download. At the end it offers to delete the downloaded files; the zip holds everything.
-        - The game sees the DLCs, and asks per save whether to activate them. Playing with DLCs is untested, and The Butcher's Circus PvP normally goes through Steam.
      3. Copy `darkest-dungeon-steam.zip` to the phone.
 3. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer or the zip.
    - The app unpacks only the game data and converts six shaders to OpenGL ES.
