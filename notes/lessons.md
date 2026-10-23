@@ -69,3 +69,6 @@ Project rules learned from mistakes made during the port.
 - `tar -T list` accepts `-C` and a folder on their own lines, so one list can merge several depot folders into one zip.
 - Run a `.bat` from Git Bash as `cmd //c "$(cygpath -w <path>)"`; a bare name fails with "not recognized" when the bat isn't in cmd's current folder.
 - Python edits to Windows paths: a backslash-t in a normal string literal is a tab (`System32\tar.exe` broke this way, twice). Use raw strings, or edit the file directly in an editor.
+
+## Release notes
+- A release's notes hold only what is new in it and the signing certificate's SHA-256, nothing else: no intro line ("Runs your own GOG or Steam copy…"), no install steps, no test list, no README pointer. Those belong in the README; copied into each release, they repeat down the whole Releases page.
