@@ -1,0 +1,93 @@
+Darkest Dungeon Porter includes the following third-party software. The port's own code is under the
+MIT licence (see LICENSE in the source repository). The patches in port/apk/patches/ are changes to the
+projects below and are under the licence of the project they patch.
+
+Darkest Dungeon itself is not included: it is imported from the player's own copy of the GOG Linux
+installer. Darkest Dungeon is a trademark of Red Hook Studios Inc. This project is not affiliated with
+or endorsed by Red Hook Studios or GOG.
+
+================================================================================
+Box64 (https://github.com/ptitSeb/box64), commit d96343fbb, with patches
+libbox64.so
+--------------------------------------------------------------------------------
+MIT License
+
+Copyright (c) 2020 ptitSeb
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+gl4es (https://github.com/ptitSeb/gl4es), commit a025615b, with patches
+libGL.so
+--------------------------------------------------------------------------------
+Copyright (c) 2016-2018 Sebastien Chevalier
+Copyright (c) 2013-2016 Ryan Hileman
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+================================================================================
+SDL 2 (https://www.libsdl.org/), release-2.32.10, with patches
+libSDL2.so
+--------------------------------------------------------------------------------
+Copyright (C) 1997-2025 Sam Lantinga <slouken@libsdl.org>
+  
+This software is provided 'as-is', without any express or implied
+warranty.  In no event will the authors be held liable for any damages
+arising from the use of this software.
+
+Permission is granted to anyone to use this software for any purpose,
+including commercial applications, and to alter it and redistribute it
+freely, subject to the following restrictions:
+  
+1. The origin of this software must not be misrepresented; you must not
+   claim that you wrote the original software. If you use this software
+   in a product, an acknowledgment in the product documentation would be
+   appreciated but is not required. 
+2. Altered source versions must be plainly marked as such, and must not be
+   misrepresented as being the original software.
+3. This notice may not be removed or altered from any source distribution.
+
+
+================================================================================
+GCC runtime libraries for x86_64: libstdc++.so.6 and libgcc_s.so.1
+From Debian 12 packages libstdc++6 and libgcc-s1, version 12.2.0-14+deb12u1 (unmodified)
+--------------------------------------------------------------------------------
+These libraries are free software under the GNU General Public License, version 3 or later, with the
+GCC Runtime Library Exception, version 3.1:
+  https://www.gnu.org/licenses/gpl-3.0.html
+  https://www.gnu.org/licenses/gcc-exception-3.1.html
+The complete corresponding source code is the Debian source package gcc-12, version 12.2.0-14+deb12u1:
+  https://snapshot.debian.org/package/gcc-12/12.2.0-14%2Bdeb12u1/
+  https://deb.debian.org/debian/pool/main/g/gcc-12/

@@ -1,0 +1,18 @@
+diff --git a/src/gl/program.c b/src/gl/program.c
+index 2eaeb02b..13934d27 100644
+--- a/src/gl/program.c
++++ b/src/gl/program.c
+@@ -798,6 +798,13 @@ void APIENTRY_GL4ES gl4es_glLinkProgram(GLuint program) {
+             // should DBG the linker error?
+             DBG(printf(" Link failled!\n");)
+             glprogram->linked = 0;
++            if(globals4es.logshader) {
++                LOAD_GLES2(glGetProgramInfoLog);
++                char tmp[1000];
++                GLint length;
++                gles_glGetProgramInfoLog(glprogram->id, 1000, &length, tmp);
++                printf("LIBGL: Error while linking program %d:\n%s\nLIBGL: End of Error log\n", program, tmp);
++            }
+             errorShim(err);
+             return;
+         }

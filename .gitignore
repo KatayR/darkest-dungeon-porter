@@ -1,0 +1,11 @@
+# Repo tracks only the Android port work; the game install itself is never committed.
+/*
+!/.gitignore
+!/.gitattributes
+!/README.md
+!/LICENSE
+!/port/
+!/notes/
+# Gradle state (builds run from a copy under C:\dd-build, see port/apk/build-apk.sh)
+port/apk/.gradle/
+port/apk/local.properties

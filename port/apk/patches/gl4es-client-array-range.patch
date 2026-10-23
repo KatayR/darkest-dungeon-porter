@@ -1,0 +1,78 @@
+diff --git a/src/gl/fpe.c b/src/gl/fpe.c
+index b001d477..ede6677c 100644
+--- a/src/gl/fpe.c
++++ b/src/gl/fpe.c
+@@ -824,6 +824,60 @@ void APIENTRY_GL4ES fpe_glDrawArrays(GLenum mode, GLint first, GLsizei count) {
+     free_scratch(&scratch);
+ }
+ 
++// Client-side arrays: Adreno copies vertices 0..max index for every draw. Games that stream into one
++// big buffer draw a few vertices far into it, so for this draw the attribute pointers start at the
++// lowest index and the indices are rebased to it. NULL: nothing to rebase (indices unchanged).
++static const GLvoid *rebase_client_arrays(GLsizei count, GLenum type, const GLvoid *indices, const GLvoid **saved) {
++    if (type != GL_UNSIGNED_SHORT && type != GL_UNSIGNED_INT)
++        return NULL;
++    for (int i = 0; i < hardext.maxvattrib; i++) {
++        vertexattrib_t *v = &glstate->gleshard->vertexattrib[i];
++        if (v->enabled && (v->real_buffer || v->integer))
++            return NULL;
++    }
++    GLsizei imin, imax;
++    if (type == GL_UNSIGNED_INT)
++        getminmax_indices_ui(indices, &imax, &imin, count);
++    else
++        getminmax_indices_us(indices, &imax, &imin, count);
++    if (imin <= 0)
++        return NULL;
++    static void *buf;
++    static size_t bufsize;
++    size_t size = count * gl_sizeof(type);
++    if (bufsize < size) {
++        buf = realloc(buf, size);
++        bufsize = size;
++    }
++    if (type == GL_UNSIGNED_INT)
++        for (int k = 0; k < count; k++)
++            ((GLuint *)buf)[k] = ((const GLuint *)indices)[k] - imin;
++    else
++        for (int k = 0; k < count; k++)
++            ((GLushort *)buf)[k] = ((const GLushort *)indices)[k] - imin;
++    LOAD_GLES2(glVertexAttribPointer);
++    for (int i = 0; i < hardext.maxvattrib; i++) {
++        vertexattrib_t *v = &glstate->gleshard->vertexattrib[i];
++        saved[i] = NULL;
++        if (!v->enabled)
++            continue;
++        int stride = v->stride ? v->stride : gl_sizeof(v->type) * v->size;
++        saved[i] = v->pointer;
++        gles_glVertexAttribPointer(i, v->size, v->type, v->normalized, v->stride, (const char *)v->pointer + imin * stride);
++    }
++    return buf;
++}
++
++// puts back the attribute pointers rebase_client_arrays moved
++static void restore_client_arrays(const GLvoid **saved) {
++    LOAD_GLES2(glVertexAttribPointer);
++    for (int i = 0; i < hardext.maxvattrib; i++) {
++        vertexattrib_t *v = &glstate->gleshard->vertexattrib[i];
++        if (saved[i])
++            gles_glVertexAttribPointer(i, v->size, v->type, v->normalized, v->stride, saved[i]);
++    }
++}
++
+ void APIENTRY_GL4ES fpe_glDrawElements(GLenum mode, GLsizei count, GLenum type, const GLvoid *indices) {
+     DBG(printf("fpe_glDrawElements(%s, %d, %s, %p), program=%d, instanceID=%u\n", PrintEnum(mode), count, PrintEnum(type), indices, glstate->glsl->program, glstate->instanceID);)
+     scratch_t scratch = {0};
+@@ -837,7 +891,11 @@ void APIENTRY_GL4ES fpe_glDrawElements(GLenum mode, GLsizei count, GLenum type,
+         DBG(printf("Using VBO %d for indices\n", glstate->vao->elements->real_buffer);)
+     }
+     realize_bufferIndex();
+-    gles_glDrawElements(mode, count, type, indices);
++    const GLvoid *saved[MAX_VATTRIB];
++    const GLvoid *rebased = use_vbo ? NULL : rebase_client_arrays(count, type, indices, saved);
++    gles_glDrawElements(mode, count, type, rebased ? rebased : indices);
++    if (rebased)
++        restore_client_arrays(saved);
+     if(use_vbo)
+         wantBufferIndex(0);
+     free_scratch(&scratch);

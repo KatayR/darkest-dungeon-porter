@@ -1,0 +1,60 @@
+plugins {
+    id 'com.android.application'
+}
+
+def ddBuild = project.property('ddBuild')
+// keep build outputs out of the repo (and away from the non-ASCII repo path)
+layout.buildDirectory = file("${ddBuild}/gradle/app")
+
+android {
+    namespace 'org.ddport.darkest'
+    compileSdk 35
+    ndkVersion '27.1.12297006'
+
+    defaultConfig {
+        applicationId 'org.ddport.darkest'
+        minSdk 31            // libbox64.so / libGL.so are built for API 31
+        targetSdk 34
+        versionCode 1
+        versionName '0.1'
+        ndk { abiFilters 'arm64-v8a' }
+        externalNativeBuild {
+            cmake { arguments "-DDD_BUILD=${ddBuild}" }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path 'jni/CMakeLists.txt'
+            version '3.22.1'
+            buildStagingDirectory "${ddBuild}/cxx"
+        }
+    }
+    sourceSets.main {
+        res.srcDirs += "${ddBuild}/src/SDL2/android-project/app/src/main/res"
+        jniLibs.srcDirs += "${ddBuild}/out/jniLibs"     // libbox64.so, libGL.so (gl4es)
+        assets.srcDirs += "${ddBuild}/out/assets"       // x64lib/: x86_64 libstdc++, libgcc_s
+    }
+    packaging {
+        jniLibs { useLegacyPackaging true }   // native libs must be real files: box64 dlopens libGL.so by path
+    }
+    // release signing key from the environment (never in the repo); without DD_KEYSTORE the release
+    // APK is left unsigned, to be signed with apksigner
+    def keystore = System.getenv('DD_KEYSTORE')
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile file(keystore)
+                storePassword System.getenv('DD_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('DD_KEY_ALIAS')
+                keyPassword System.getenv('DD_KEY_PASSWORD') ?: System.getenv('DD_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (keystore) signingConfig signingConfigs.release
+        }
+    }
+    lint { abortOnError false }
+}

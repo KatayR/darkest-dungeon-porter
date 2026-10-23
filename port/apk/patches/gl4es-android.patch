@@ -1,0 +1,53 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 0ddf1607..29e8430d 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -166,6 +166,9 @@ else()
+     list(APPEND GL_SRC
+         ${CMAKE_CURRENT_SOURCE_DIR}/glx/hardext.c
+     )
++    if(ANDROID)
++        list(APPEND GL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/glx/android_glx.c)
++    endif()
+     message(STATUS "Not on Linux: building without GLX support.")
+ endif()
+ 
+@@ -220,7 +223,8 @@ else()
+         target_link_libraries(GL ${log-lib})
+     endif()
+     
+-    if(CMAKE_SHARED_LIBRARY_SUFFIX MATCHES ".so")
++    # Android only packages lib*.so files, so keep the plain libGL.so name there
++    if(CMAKE_SHARED_LIBRARY_SUFFIX MATCHES ".so" AND NOT ANDROID)
+         set_target_properties(GL PROPERTIES SUFFIX ".so.1")
+     endif()
+     install(TARGETS GL
+diff --git a/src/glx/android_glx.c b/src/glx/android_glx.c
+new file mode 100644
+index 00000000..67d89357
+--- /dev/null
++++ b/src/glx/android_glx.c
+@@ -0,0 +1,23 @@
++// Minimal GLX entry points for Android builds (NOX11): the context comes from the app (EGL via SDL),
++// but desktop-GL programs (e.g. run through box64) still look up functions with glXGetProcAddress
++// and may ask for the GLX version.
++#include "gl4esinit.h"
++
++typedef int Bool;
++
++__attribute__((visibility("default"))) void* glXGetProcAddress(const char* name) {
++    return gl4es_GetProcAddress(name);
++}
++__attribute__((visibility("default"))) void* glXGetProcAddressARB(const char* name) {
++    return gl4es_GetProcAddress(name);
++}
++__attribute__((visibility("default"))) Bool glXQueryVersion(void* display, int* major, int* minor) {
++    (void)display;
++    if(major) *major = 1;
++    if(minor) *minor = 4;
++    return 1;
++}
++__attribute__((visibility("default"))) const char* glXGetClientString(void* display, int name) {
++    (void)display; (void)name;
++    return "gl4es";
++}

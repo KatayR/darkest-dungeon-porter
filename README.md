@@ -1,0 +1,94 @@
+<p align="center"><img src="port/apk/icon/ddp-icon.png" width="160" alt="Darkest Dungeon Porter icon"></p>
+
+# Darkest Dungeon Porter
+
+Runs your own GOG copy of **Darkest Dungeon®** (the Linux version) natively on Android phones. There is no Windows emulator and no root. Box64 translates the game's x86_64 code to ARM64, and gl4es turns its desktop OpenGL into OpenGL ES.
+
+> **No game files are included.** You need to own Darkest Dungeon on GOG. The app imports the game from GOG's Linux installer, which you download yourself.
+> This project is not affiliated with or endorsed by Red Hook Studios or GOG. Darkest Dungeon is a trademark of Red Hook Studios Inc.
+
+## Requirements
+- Android 12 or newer, 64-bit ARM (arm64-v8a).
+- A GPU with OpenGL ES 2 and `GL_OES_texture_3D` (the game's colour grading needs it).
+- About 2.5 GB of free storage for the imported game.
+- GOG's **Linux** installer of Darkest Dungeon (`darkest_dungeon_…_linux_….sh`).
+  - Tested with build 27988.
+  - The Steam build is not supported.
+
+**Tested on:**
+
+| Device | GPU | Android | Result |
+|---|---|---|---|
+| OnePlus 5 | Adreno 540 | LineageOS 22 (Android 15) | Title and dungeon at 1080p / 60 FPS (town and battle not yet measured at 1080p) |
+| Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS; import from the installer |
+
+Other devices may work. Reports are welcome.
+
+## Install and first run
+1. Install the APK (from the Releases page, or built yourself as described below).
+2. Copy GOG's Linux installer (`.sh`) to the phone, for example into `Download/`.
+3. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer.
+   - The app unpacks only the game data and converts six shaders to OpenGL ES.
+   - You can delete the installer afterwards.
+4. Choose a resolution (1080/900/720/540) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery.
+
+Saves are kept in the app's private storage, so uninstalling the app deletes them.
+
+## Controls
+The touch screen works like a laptop trackpad:
+- **One finger** moves the cursor.
+- **Tap** to left-click.
+- **Two-finger tap** to right-click.
+- **Tap, then touch again and hold** to drag.
+- **Back** opens the game's Escape menu.
+
+## How it works
+The app runs as two processes:
+
+```
+app process (Java + libddview.so)                     game process (libddhost.so, started by the app)
+  launch / import screens                               Box64 as a shared library, built against Android's libc
+  shows the game's frames, draws the cursor   <-- frames + fences --   x86_64 darkest.bin, FMOD, libstdc++
+  touch -> trackpad, Back -> Escape           -- input -->             libddglue.so  (stands in for SDL2: GLES context, frames, input)
+                                                                         libGL.so      (gl4es: OpenGL 2.1 -> GLES 2)
+                                                                         libddaudio.so (stands in for ALSA: FMOD's output -> AAudio)
+```
+
+- **Box64 on Android's libc:** Box64's Android build only runs Android x86_64 programs, and the game is a Linux (glibc) program. `port/apk/patches/box64-glibc-on-bionic.patch` adds the missing glibc layer on top of Android's bionic libc: program start-up, ctype and locale tables, `sysconf`/`nl_langinfo`/`glob` constant translation, and more. No glibc or Linux root filesystem is needed.
+- **gl4es patches:**
+  - real 3D textures for the colour-lookup tables;
+  - client-array draws that pass only the vertex range they use, which takes 1080p from about 45 to 60 FPS on Adreno;
+  - a fix for a scissor/viewport cache bug.
+- **Frames:** the game renders into shared hardware buffers. The app shows them, and native fences keep the two processes in step without `glFinish`.
+
+The full development log, including measurements and dead ends, is in [`notes/todo.md`](notes/todo.md). Lessons learned are in [`notes/lessons.md`](notes/lessons.md). [`port/phone/`](port/phone) holds the first approach: a rooted phone with a Debian chroot and VirGL.
+
+## Building
+The build scripts are tested on **Windows with Git Bash**. Linux and macOS hosts are untested, because the scripts call Windows tools such as `cygpath` and `tar.exe`.
+
+**Needed:**
+- Android SDK with NDK 27.1.12297006, CMake 3.22.1 and 4.1.2;
+- JDK 17 (Android Studio's bundled JBR works);
+- git, curl and Python 3.
+
+```bash
+port/apk/build-natives.sh          # fetches pinned Box64, gl4es and SDL2, applies port/apk/patches, builds them
+port/apk/build-apk.sh              # debug APK
+port/apk/build-apk.sh release      # release APK (signing below)
+```
+
+- Sources and build output go to `$DD_BUILD` (default `C:\dd-build`), outside the repo.
+- The APK lands in `$DD_BUILD/gradle/app/outputs/apk/<type>/`.
+
+**Signing a release build:** `DD_KEYSTORE`, `DD_KEYSTORE_PASSWORD` and `DD_KEY_ALIAS` select the key (plus `DD_KEY_PASSWORD` if the key has its own password). Without them the release APK is unsigned; sign it with `apksigner` using your own key.
+
+**Notes:**
+- Release builds are not debuggable.
+- The game's log is written to `dd.log` in the app's files folder, and the frame rate is logged to logcat, which helps with bug reports.
+- The launcher icon is generated by `port/apk/icon/make-icon.py`.
+
+## Credits and licence
+- [Box64](https://github.com/ptitSeb/box64) and [gl4es](https://github.com/ptitSeb/gl4es) by ptitSeb and contributors, [SDL](https://www.libsdl.org/), and the GCC runtime libraries from Debian.
+  - Their licences are in [`THIRD_PARTY_NOTICES.txt`](port/apk/app/src/main/assets/THIRD_PARTY_NOTICES.txt), which is also shipped inside the APK.
+  - The Gradle wrapper is Apache-2.0.
+- The port's own code is under the [MIT licence](LICENSE). The patches are under the licence of the project they patch.

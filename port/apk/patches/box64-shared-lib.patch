@@ -1,0 +1,108 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4098f33e2..6f21fbcf7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -39,6 +39,7 @@ option(HAVE_TRACE "Set to ON to have Trace ability (needs libzydis-dev)" ${HAVE_
+ option(ZYDIS3 "Set to ON if you have trace and an old libzydis v3.x" ${ZYDIS3})
+ option(SAVE_MEM "Set to ON to build dynarec with some slower memory saving optimizations" ${SAVE_MEM})
+ option(NOLOADADDR "Set to ON to avoid fixing the load address of Box64" OFF)
++option(BOX64_SHARED "Set to ON to build box64 as a shared library exporting box64_run(), to run it inside an app process" OFF)
+ option(NOGIT "Set to ON if not building from a git clone repo (like when building from a zip download from github)" ${NOGIT})
+ option(BAD_SIGNAL "Set to ON to activate the workaround for incoherent si_info on SIGSEGV" ${BAD_SIGNAL})
+ option(BAD_PKILL "Set to ON to activate the workaround for incoherent pthread_kill" ${BAD_PKILL})
+@@ -1267,6 +1268,13 @@ if(GDBJIT)
+ set(GDBJITREADER "${BOX64_ROOT}/gdbjit/reader.c")
+ endif()
+ 
++if(BOX64_SHARED)
++    # everything ends up in a shared library: objects must be PIC, and there is no fixed load address
++    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
++    set(NOLOADADDR ON)
++    add_definitions(-DBOX64_SHARED)
++endif()
++
+ if(DYNAREC)
+     set(DYNAREC_PASS
+         "${BOX64_ROOT}/src/wrapped/generated/wrapper.h"
+@@ -1350,7 +1358,11 @@ add_dependencies(mainobj generate_git_head_target)
+ add_dependencies(mainobj generate_dynacache_hashes)
+ 
+ if(NOT NOBOX64)
+-    add_executable(${BOX64})
++    if(BOX64_SHARED)
++        add_library(${BOX64} SHARED)
++    else()
++        add_executable(${BOX64})
++    endif()
+     target_link_libraries(${BOX64} mainobj)
+     set_target_properties(${BOX64} PROPERTIES ENABLE_EXPORTS ON)
+     add_dependencies(${BOX64} WRAPPERS)
+diff --git a/src/box64context.c b/src/box64context.c
+index 751b301ba..77db9e2ea 100644
+--- a/src/box64context.c
++++ b/src/box64context.c
+@@ -216,7 +216,11 @@ box64context_t *NewBox64Context(int argc)
+     // create exit bridge
+     context->exit_bridge = AddBridge(context->system, NULL, NULL, 0, NULL);
+     // get handle to box64 itself
+-    #ifndef STATICBUILD
++    #if defined(BOX64_SHARED)
++    // loaded into another process, dlopen(NULL) is that process: open this library itself instead
++    Dl_info self;
++    context->box64lib = dladdr((void*)NewBox64Context, &self)?dlopen(self.dli_fname, RTLD_NOW|RTLD_NOLOAD):NULL;
++    #elif !defined(STATICBUILD)
+     context->box64lib = dlopen(NULL, RTLD_NOW|RTLD_GLOBAL);
+     #endif
+     context->dlprivate = NewDLPrivate();
+diff --git a/src/core.c b/src/core.c
+index 468775bf1..0d3265ec2 100644
+--- a/src/core.c
++++ b/src/core.c
+@@ -1059,7 +1059,13 @@ int initialize(int argc, const char **argv, char** env, x64emu_t** emulator, elf
+     if(is_custom_gstreamer) //TODO: is this still needed?
+         AddPath("libwayland-client.so.0", &my_context->box64_emulated_libs, 0);
+ 
++    #ifdef BOX64_SHARED
++    // there is no box64 executable: the library itself stands for it
++    Dl_info self;
++    my_context->box64path = box_strdup(dladdr((void*)initialize, &self)?self.dli_fname:argv[0]);
++    #else
+     my_context->box64path = ResolveFile(argv[0], &my_context->box64_path);
++    #endif
+     // prepare all other env. var
+     my_context->envc = CountEnv(environ?environ:env);
+     printf_log(LOG_INFO, "Counted %d Env var\n", my_context->envc);
+diff --git a/src/main.c b/src/main.c
+index a91825c4b..6bd59dee7 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -1,7 +1,29 @@
+ // SPDX-License-Identifier: MIT
++#include <stdlib.h>
++#include <string.h>
+ #include "core.h"
++#include "debug.h"
+ 
++#ifdef BOX64_SHARED
++// Entry point when box64 is a shared library loaded into another process (e.g. an Android app):
++// argv[0] stands for box64 itself, argv[1] is the x86_64 program to run.
++EXPORT int box64_run(int argc, const char **argv, char **env) {
++    // initialize() shifts the argv strings in place, as if they were this process' own contiguous
++    // argv: give it a writable copy laid out that way
++    size_t size = 0;
++    for (int i = 0; i < argc; ++i)
++        size += strlen(argv[i]) + 1;
++    char* strings = calloc(1, size);
++    const char** args = calloc(argc + 1, sizeof(char*));
++    char* p = strings;
++    for (int i = 0; i < argc; ++i) {
++        args[i] = strcpy(p, argv[i]);
++        p += strlen(argv[i]) + 1;
++    }
++    argv = args;
++#else
+ int main(int argc, const char **argv, char **env) {
++#endif
+ 
+     x64emu_t* emu = NULL;
+     elfheader_t* elf_header = NULL;

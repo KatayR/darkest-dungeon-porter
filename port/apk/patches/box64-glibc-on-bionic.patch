@@ -1,0 +1,1440 @@
+diff --git a/src/emu/entrypoint.c b/src/emu/entrypoint.c
+index d0670fa3a..16a8e1fbd 100644
+--- a/src/emu/entrypoint.c
++++ b/src/emu/entrypoint.c
+@@ -30,7 +30,8 @@ void EXPORT my___libc_init(x64emu_t* emu, void* raw_args , void (*onexit)(void)
+     SetRBP(emu, Pop64(emu));    // restore RBP
+     emu->quit = 1; // finished!
+ }
+-#else
++#endif
++// glibc guests use __libc_start_main; Android builds keep it too so they can run glibc binaries
+ EXPORT int32_t my___libc_start_main(x64emu_t* emu, int (*main) (int, char * *, char * *), int argc, char * * ubp_av, void (*init) (void), void (*fini) (void), void (*rtld_fini) (void), void (* stack_end))
+ {
+     (void)argc; (void)ubp_av; (void)fini; (void)rtld_fini; (void)stack_end;
+@@ -145,4 +146,3 @@ int32_t EXPORT my32___libc_start_main(x64emu_t* emu, int *(main) (int, char * *,
+ }
+ #endif
+ #endif
+-#endif
+diff --git a/src/wrapped/glibc_consts_android.h b/src/wrapped/glibc_consts_android.h
+new file mode 100644
+index 000000000..6005f76e7
+--- /dev/null
++++ b/src/wrapped/glibc_consts_android.h
+@@ -0,0 +1,625 @@
++// glibc x86_64 value -> bionic constant, for glibc guests on Android (see port/apk/patches/gen-glibc-consts.sh
++// in the Darkest Dungeon port). Generated: do not edit by hand.
++static const int glibc_sc_map[][2] = {
++#ifdef _SC_2_CHAR_TERM
++    {95, _SC_2_CHAR_TERM},
++#endif
++#ifdef _SC_2_C_BIND
++    {47, _SC_2_C_BIND},
++#endif
++#ifdef _SC_2_C_DEV
++    {48, _SC_2_C_DEV},
++#endif
++#ifdef _SC_2_C_VERSION
++    {96, _SC_2_C_VERSION},
++#endif
++#ifdef _SC_2_FORT_DEV
++    {49, _SC_2_FORT_DEV},
++#endif
++#ifdef _SC_2_FORT_RUN
++    {50, _SC_2_FORT_RUN},
++#endif
++#ifdef _SC_2_LOCALEDEF
++    {52, _SC_2_LOCALEDEF},
++#endif
++#ifdef _SC_2_PBS
++    {168, _SC_2_PBS},
++#endif
++#ifdef _SC_2_PBS_ACCOUNTING
++    {169, _SC_2_PBS_ACCOUNTING},
++#endif
++#ifdef _SC_2_PBS_CHECKPOINT
++    {175, _SC_2_PBS_CHECKPOINT},
++#endif
++#ifdef _SC_2_PBS_LOCATE
++    {170, _SC_2_PBS_LOCATE},
++#endif
++#ifdef _SC_2_PBS_MESSAGE
++    {171, _SC_2_PBS_MESSAGE},
++#endif
++#ifdef _SC_2_PBS_TRACK
++    {172, _SC_2_PBS_TRACK},
++#endif
++#ifdef _SC_2_SW_DEV
++    {51, _SC_2_SW_DEV},
++#endif
++#ifdef _SC_2_UPE
++    {97, _SC_2_UPE},
++#endif
++#ifdef _SC_2_VERSION
++    {46, _SC_2_VERSION},
++#endif
++#ifdef _SC_ADVISORY_INFO
++    {132, _SC_ADVISORY_INFO},
++#endif
++#ifdef _SC_AIO_LISTIO_MAX
++    {23, _SC_AIO_LISTIO_MAX},
++#endif
++#ifdef _SC_AIO_MAX
++    {24, _SC_AIO_MAX},
++#endif
++#ifdef _SC_AIO_PRIO_DELTA_MAX
++    {25, _SC_AIO_PRIO_DELTA_MAX},
++#endif
++#ifdef _SC_ARG_MAX
++    {0, _SC_ARG_MAX},
++#endif
++#ifdef _SC_ASYNCHRONOUS_IO
++    {12, _SC_ASYNCHRONOUS_IO},
++#endif
++#ifdef _SC_ATEXIT_MAX
++    {87, _SC_ATEXIT_MAX},
++#endif
++#ifdef _SC_AVPHYS_PAGES
++    {86, _SC_AVPHYS_PAGES},
++#endif
++#ifdef _SC_BARRIERS
++    {133, _SC_BARRIERS},
++#endif
++#ifdef _SC_BC_BASE_MAX
++    {36, _SC_BC_BASE_MAX},
++#endif
++#ifdef _SC_BC_DIM_MAX
++    {37, _SC_BC_DIM_MAX},
++#endif
++#ifdef _SC_BC_SCALE_MAX
++    {38, _SC_BC_SCALE_MAX},
++#endif
++#ifdef _SC_BC_STRING_MAX
++    {39, _SC_BC_STRING_MAX},
++#endif
++#ifdef _SC_CHILD_MAX
++    {1, _SC_CHILD_MAX},
++#endif
++#ifdef _SC_CLK_TCK
++    {2, _SC_CLK_TCK},
++#endif
++#ifdef _SC_CLOCK_SELECTION
++    {137, _SC_CLOCK_SELECTION},
++#endif
++#ifdef _SC_COLL_WEIGHTS_MAX
++    {40, _SC_COLL_WEIGHTS_MAX},
++#endif
++#ifdef _SC_CPUTIME
++    {138, _SC_CPUTIME},
++#endif
++#ifdef _SC_DELAYTIMER_MAX
++    {26, _SC_DELAYTIMER_MAX},
++#endif
++#ifdef _SC_EXPR_NEST_MAX
++    {42, _SC_EXPR_NEST_MAX},
++#endif
++#ifdef _SC_FSYNC
++    {15, _SC_FSYNC},
++#endif
++#ifdef _SC_GETGR_R_SIZE_MAX
++    {69, _SC_GETGR_R_SIZE_MAX},
++#endif
++#ifdef _SC_GETPW_R_SIZE_MAX
++    {70, _SC_GETPW_R_SIZE_MAX},
++#endif
++#ifdef _SC_HOST_NAME_MAX
++    {180, _SC_HOST_NAME_MAX},
++#endif
++#ifdef _SC_IOV_MAX
++    {60, _SC_IOV_MAX},
++#endif
++#ifdef _SC_IPV6
++    {235, _SC_IPV6},
++#endif
++#ifdef _SC_JOB_CONTROL
++    {7, _SC_JOB_CONTROL},
++#endif
++#ifdef _SC_LEVEL1_DCACHE_ASSOC
++    {189, _SC_LEVEL1_DCACHE_ASSOC},
++#endif
++#ifdef _SC_LEVEL1_DCACHE_LINESIZE
++    {190, _SC_LEVEL1_DCACHE_LINESIZE},
++#endif
++#ifdef _SC_LEVEL1_DCACHE_SIZE
++    {188, _SC_LEVEL1_DCACHE_SIZE},
++#endif
++#ifdef _SC_LEVEL1_ICACHE_ASSOC
++    {186, _SC_LEVEL1_ICACHE_ASSOC},
++#endif
++#ifdef _SC_LEVEL1_ICACHE_LINESIZE
++    {187, _SC_LEVEL1_ICACHE_LINESIZE},
++#endif
++#ifdef _SC_LEVEL1_ICACHE_SIZE
++    {185, _SC_LEVEL1_ICACHE_SIZE},
++#endif
++#ifdef _SC_LEVEL2_CACHE_ASSOC
++    {192, _SC_LEVEL2_CACHE_ASSOC},
++#endif
++#ifdef _SC_LEVEL2_CACHE_LINESIZE
++    {193, _SC_LEVEL2_CACHE_LINESIZE},
++#endif
++#ifdef _SC_LEVEL2_CACHE_SIZE
++    {191, _SC_LEVEL2_CACHE_SIZE},
++#endif
++#ifdef _SC_LEVEL3_CACHE_ASSOC
++    {195, _SC_LEVEL3_CACHE_ASSOC},
++#endif
++#ifdef _SC_LEVEL3_CACHE_LINESIZE
++    {196, _SC_LEVEL3_CACHE_LINESIZE},
++#endif
++#ifdef _SC_LEVEL3_CACHE_SIZE
++    {194, _SC_LEVEL3_CACHE_SIZE},
++#endif
++#ifdef _SC_LEVEL4_CACHE_ASSOC
++    {198, _SC_LEVEL4_CACHE_ASSOC},
++#endif
++#ifdef _SC_LEVEL4_CACHE_LINESIZE
++    {199, _SC_LEVEL4_CACHE_LINESIZE},
++#endif
++#ifdef _SC_LEVEL4_CACHE_SIZE
++    {197, _SC_LEVEL4_CACHE_SIZE},
++#endif
++#ifdef _SC_LINE_MAX
++    {43, _SC_LINE_MAX},
++#endif
++#ifdef _SC_LOGIN_NAME_MAX
++    {71, _SC_LOGIN_NAME_MAX},
++#endif
++#ifdef _SC_MAPPED_FILES
++    {16, _SC_MAPPED_FILES},
++#endif
++#ifdef _SC_MEMLOCK
++    {17, _SC_MEMLOCK},
++#endif
++#ifdef _SC_MEMLOCK_RANGE
++    {18, _SC_MEMLOCK_RANGE},
++#endif
++#ifdef _SC_MEMORY_PROTECTION
++    {19, _SC_MEMORY_PROTECTION},
++#endif
++#ifdef _SC_MESSAGE_PASSING
++    {20, _SC_MESSAGE_PASSING},
++#endif
++#ifdef _SC_MONOTONIC_CLOCK
++    {149, _SC_MONOTONIC_CLOCK},
++#endif
++#ifdef _SC_MQ_OPEN_MAX
++    {27, _SC_MQ_OPEN_MAX},
++#endif
++#ifdef _SC_MQ_PRIO_MAX
++    {28, _SC_MQ_PRIO_MAX},
++#endif
++#ifdef _SC_NGROUPS_MAX
++    {3, _SC_NGROUPS_MAX},
++#endif
++#ifdef _SC_NPROCESSORS_CONF
++    {83, _SC_NPROCESSORS_CONF},
++#endif
++#ifdef _SC_NPROCESSORS_ONLN
++    {84, _SC_NPROCESSORS_ONLN},
++#endif
++#ifdef _SC_OPEN_MAX
++    {4, _SC_OPEN_MAX},
++#endif
++#ifdef _SC_PAGESIZE
++    {30, _SC_PAGESIZE},
++#endif
++#ifdef _SC_PAGE_SIZE
++    {30, _SC_PAGE_SIZE},
++#endif
++#ifdef _SC_PASS_MAX
++    {88, _SC_PASS_MAX},
++#endif
++#ifdef _SC_PHYS_PAGES
++    {85, _SC_PHYS_PAGES},
++#endif
++#ifdef _SC_PRIORITIZED_IO
++    {13, _SC_PRIORITIZED_IO},
++#endif
++#ifdef _SC_PRIORITY_SCHEDULING
++    {10, _SC_PRIORITY_SCHEDULING},
++#endif
++#ifdef _SC_RAW_SOCKETS
++    {236, _SC_RAW_SOCKETS},
++#endif
++#ifdef _SC_READER_WRITER_LOCKS
++    {153, _SC_READER_WRITER_LOCKS},
++#endif
++#ifdef _SC_REALTIME_SIGNALS
++    {9, _SC_REALTIME_SIGNALS},
++#endif
++#ifdef _SC_REGEXP
++    {155, _SC_REGEXP},
++#endif
++#ifdef _SC_RE_DUP_MAX
++    {44, _SC_RE_DUP_MAX},
++#endif
++#ifdef _SC_RTSIG_MAX
++    {31, _SC_RTSIG_MAX},
++#endif
++#ifdef _SC_SAVED_IDS
++    {8, _SC_SAVED_IDS},
++#endif
++#ifdef _SC_SEMAPHORES
++    {21, _SC_SEMAPHORES},
++#endif
++#ifdef _SC_SEM_NSEMS_MAX
++    {32, _SC_SEM_NSEMS_MAX},
++#endif
++#ifdef _SC_SEM_VALUE_MAX
++    {33, _SC_SEM_VALUE_MAX},
++#endif
++#ifdef _SC_SHARED_MEMORY_OBJECTS
++    {22, _SC_SHARED_MEMORY_OBJECTS},
++#endif
++#ifdef _SC_SHELL
++    {157, _SC_SHELL},
++#endif
++#ifdef _SC_SIGQUEUE_MAX
++    {34, _SC_SIGQUEUE_MAX},
++#endif
++#ifdef _SC_SPAWN
++    {159, _SC_SPAWN},
++#endif
++#ifdef _SC_SPIN_LOCKS
++    {154, _SC_SPIN_LOCKS},
++#endif
++#ifdef _SC_SPORADIC_SERVER
++    {160, _SC_SPORADIC_SERVER},
++#endif
++#ifdef _SC_SS_REPL_MAX
++    {241, _SC_SS_REPL_MAX},
++#endif
++#ifdef _SC_STREAM_MAX
++    {5, _SC_STREAM_MAX},
++#endif
++#ifdef _SC_SYMLOOP_MAX
++    {173, _SC_SYMLOOP_MAX},
++#endif
++#ifdef _SC_SYNCHRONIZED_IO
++    {14, _SC_SYNCHRONIZED_IO},
++#endif
++#ifdef _SC_THREADS
++    {67, _SC_THREADS},
++#endif
++#ifdef _SC_THREAD_ATTR_STACKADDR
++    {77, _SC_THREAD_ATTR_STACKADDR},
++#endif
++#ifdef _SC_THREAD_ATTR_STACKSIZE
++    {78, _SC_THREAD_ATTR_STACKSIZE},
++#endif
++#ifdef _SC_THREAD_CPUTIME
++    {139, _SC_THREAD_CPUTIME},
++#endif
++#ifdef _SC_THREAD_DESTRUCTOR_ITERATIONS
++    {73, _SC_THREAD_DESTRUCTOR_ITERATIONS},
++#endif
++#ifdef _SC_THREAD_KEYS_MAX
++    {74, _SC_THREAD_KEYS_MAX},
++#endif
++#ifdef _SC_THREAD_PRIORITY_SCHEDULING
++    {79, _SC_THREAD_PRIORITY_SCHEDULING},
++#endif
++#ifdef _SC_THREAD_PRIO_INHERIT
++    {80, _SC_THREAD_PRIO_INHERIT},
++#endif
++#ifdef _SC_THREAD_PRIO_PROTECT
++    {81, _SC_THREAD_PRIO_PROTECT},
++#endif
++#ifdef _SC_THREAD_PROCESS_SHARED
++    {82, _SC_THREAD_PROCESS_SHARED},
++#endif
++#ifdef _SC_THREAD_ROBUST_PRIO_INHERIT
++    {247, _SC_THREAD_ROBUST_PRIO_INHERIT},
++#endif
++#ifdef _SC_THREAD_ROBUST_PRIO_PROTECT
++    {248, _SC_THREAD_ROBUST_PRIO_PROTECT},
++#endif
++#ifdef _SC_THREAD_SAFE_FUNCTIONS
++    {68, _SC_THREAD_SAFE_FUNCTIONS},
++#endif
++#ifdef _SC_THREAD_SPORADIC_SERVER
++    {161, _SC_THREAD_SPORADIC_SERVER},
++#endif
++#ifdef _SC_THREAD_STACK_MIN
++    {75, _SC_THREAD_STACK_MIN},
++#endif
++#ifdef _SC_THREAD_THREADS_MAX
++    {76, _SC_THREAD_THREADS_MAX},
++#endif
++#ifdef _SC_TIMEOUTS
++    {164, _SC_TIMEOUTS},
++#endif
++#ifdef _SC_TIMERS
++    {11, _SC_TIMERS},
++#endif
++#ifdef _SC_TIMER_MAX
++    {35, _SC_TIMER_MAX},
++#endif
++#ifdef _SC_TRACE
++    {181, _SC_TRACE},
++#endif
++#ifdef _SC_TRACE_EVENT_FILTER
++    {182, _SC_TRACE_EVENT_FILTER},
++#endif
++#ifdef _SC_TRACE_EVENT_NAME_MAX
++    {242, _SC_TRACE_EVENT_NAME_MAX},
++#endif
++#ifdef _SC_TRACE_INHERIT
++    {183, _SC_TRACE_INHERIT},
++#endif
++#ifdef _SC_TRACE_LOG
++    {184, _SC_TRACE_LOG},
++#endif
++#ifdef _SC_TRACE_NAME_MAX
++    {243, _SC_TRACE_NAME_MAX},
++#endif
++#ifdef _SC_TRACE_SYS_MAX
++    {244, _SC_TRACE_SYS_MAX},
++#endif
++#ifdef _SC_TRACE_USER_EVENT_MAX
++    {245, _SC_TRACE_USER_EVENT_MAX},
++#endif
++#ifdef _SC_TTY_NAME_MAX
++    {72, _SC_TTY_NAME_MAX},
++#endif
++#ifdef _SC_TYPED_MEMORY_OBJECTS
++    {165, _SC_TYPED_MEMORY_OBJECTS},
++#endif
++#ifdef _SC_TZNAME_MAX
++    {6, _SC_TZNAME_MAX},
++#endif
++#ifdef _SC_UIO_MAXIOV
++    {60, _SC_UIO_MAXIOV},
++#endif
++#ifdef _SC_V7_ILP32_OFF32
++    {237, _SC_V7_ILP32_OFF32},
++#endif
++#ifdef _SC_V7_ILP32_OFFBIG
++    {238, _SC_V7_ILP32_OFFBIG},
++#endif
++#ifdef _SC_V7_LP64_OFF64
++    {239, _SC_V7_LP64_OFF64},
++#endif
++#ifdef _SC_V7_LPBIG_OFFBIG
++    {240, _SC_V7_LPBIG_OFFBIG},
++#endif
++#ifdef _SC_VERSION
++    {29, _SC_VERSION},
++#endif
++#ifdef _SC_XBS5_ILP32_OFF32
++    {125, _SC_XBS5_ILP32_OFF32},
++#endif
++#ifdef _SC_XBS5_ILP32_OFFBIG
++    {126, _SC_XBS5_ILP32_OFFBIG},
++#endif
++#ifdef _SC_XBS5_LP64_OFF64
++    {127, _SC_XBS5_LP64_OFF64},
++#endif
++#ifdef _SC_XBS5_LPBIG_OFFBIG
++    {128, _SC_XBS5_LPBIG_OFFBIG},
++#endif
++#ifdef _SC_XOPEN_CRYPT
++    {92, _SC_XOPEN_CRYPT},
++#endif
++#ifdef _SC_XOPEN_ENH_I18N
++    {93, _SC_XOPEN_ENH_I18N},
++#endif
++#ifdef _SC_XOPEN_LEGACY
++    {129, _SC_XOPEN_LEGACY},
++#endif
++#ifdef _SC_XOPEN_REALTIME
++    {130, _SC_XOPEN_REALTIME},
++#endif
++#ifdef _SC_XOPEN_REALTIME_THREADS
++    {131, _SC_XOPEN_REALTIME_THREADS},
++#endif
++#ifdef _SC_XOPEN_SHM
++    {94, _SC_XOPEN_SHM},
++#endif
++#ifdef _SC_XOPEN_STREAMS
++    {246, _SC_XOPEN_STREAMS},
++#endif
++#ifdef _SC_XOPEN_UNIX
++    {91, _SC_XOPEN_UNIX},
++#endif
++#ifdef _SC_XOPEN_VERSION
++    {89, _SC_XOPEN_VERSION},
++#endif
++#ifdef _SC_XOPEN_XCU_VERSION
++    {90, _SC_XOPEN_XCU_VERSION},
++#endif
++};
++static const int glibc_nl_map[][2] = {
++#ifdef CODESET
++    {14, CODESET},
++#endif
++#ifdef D_T_FMT
++    {131112, D_T_FMT},
++#endif
++#ifdef D_FMT
++    {131113, D_FMT},
++#endif
++#ifdef T_FMT
++    {131114, T_FMT},
++#endif
++#ifdef T_FMT_AMPM
++    {131115, T_FMT_AMPM},
++#endif
++#ifdef AM_STR
++    {131110, AM_STR},
++#endif
++#ifdef PM_STR
++    {131111, PM_STR},
++#endif
++#ifdef DAY_1
++    {131079, DAY_1},
++#endif
++#ifdef DAY_2
++    {131080, DAY_2},
++#endif
++#ifdef DAY_3
++    {131081, DAY_3},
++#endif
++#ifdef DAY_4
++    {131082, DAY_4},
++#endif
++#ifdef DAY_5
++    {131083, DAY_5},
++#endif
++#ifdef DAY_6
++    {131084, DAY_6},
++#endif
++#ifdef DAY_7
++    {131085, DAY_7},
++#endif
++#ifdef ABDAY_1
++    {131072, ABDAY_1},
++#endif
++#ifdef ABDAY_2
++    {131073, ABDAY_2},
++#endif
++#ifdef ABDAY_3
++    {131074, ABDAY_3},
++#endif
++#ifdef ABDAY_4
++    {131075, ABDAY_4},
++#endif
++#ifdef ABDAY_5
++    {131076, ABDAY_5},
++#endif
++#ifdef ABDAY_6
++    {131077, ABDAY_6},
++#endif
++#ifdef ABDAY_7
++    {131078, ABDAY_7},
++#endif
++#ifdef MON_1
++    {131098, MON_1},
++#endif
++#ifdef MON_2
++    {131099, MON_2},
++#endif
++#ifdef MON_3
++    {131100, MON_3},
++#endif
++#ifdef MON_4
++    {131101, MON_4},
++#endif
++#ifdef MON_5
++    {131102, MON_5},
++#endif
++#ifdef MON_6
++    {131103, MON_6},
++#endif
++#ifdef MON_7
++    {131104, MON_7},
++#endif
++#ifdef MON_8
++    {131105, MON_8},
++#endif
++#ifdef MON_9
++    {131106, MON_9},
++#endif
++#ifdef MON_10
++    {131107, MON_10},
++#endif
++#ifdef MON_11
++    {131108, MON_11},
++#endif
++#ifdef MON_12
++    {131109, MON_12},
++#endif
++#ifdef ABMON_1
++    {131086, ABMON_1},
++#endif
++#ifdef ABMON_2
++    {131087, ABMON_2},
++#endif
++#ifdef ABMON_3
++    {131088, ABMON_3},
++#endif
++#ifdef ABMON_4
++    {131089, ABMON_4},
++#endif
++#ifdef ABMON_5
++    {131090, ABMON_5},
++#endif
++#ifdef ABMON_6
++    {131091, ABMON_6},
++#endif
++#ifdef ABMON_7
++    {131092, ABMON_7},
++#endif
++#ifdef ABMON_8
++    {131093, ABMON_8},
++#endif
++#ifdef ABMON_9
++    {131094, ABMON_9},
++#endif
++#ifdef ABMON_10
++    {131095, ABMON_10},
++#endif
++#ifdef ABMON_11
++    {131096, ABMON_11},
++#endif
++#ifdef ABMON_12
++    {131097, ABMON_12},
++#endif
++#ifdef ERA
++    {131116, ERA},
++#endif
++#ifdef ERA_D_FMT
++    {131118, ERA_D_FMT},
++#endif
++#ifdef ERA_D_T_FMT
++    {131120, ERA_D_T_FMT},
++#endif
++#ifdef ERA_T_FMT
++    {131121, ERA_T_FMT},
++#endif
++#ifdef ALT_DIGITS
++    {131119, ALT_DIGITS},
++#endif
++#ifdef RADIXCHAR
++    {65536, RADIXCHAR},
++#endif
++#ifdef THOUSEP
++    {65537, THOUSEP},
++#endif
++#ifdef YESEXPR
++    {327680, YESEXPR},
++#endif
++#ifdef NOEXPR
++    {327681, NOEXPR},
++#endif
++#ifdef CRNCYSTR
++    {262159, CRNCYSTR},
++#endif
++};
++#define GLIBC_GLOB_ERR 1
++#define GLIBC_GLOB_MARK 2
++#define GLIBC_GLOB_NOSORT 4
++#define GLIBC_GLOB_DOOFFS 8
++#define GLIBC_GLOB_NOCHECK 16
++#define GLIBC_GLOB_APPEND 32
++#define GLIBC_GLOB_NOESCAPE 64
++#define GLIBC_GLOB_NOSPACE 1
++#define GLIBC_GLOB_ABORTED 2
++#define GLIBC_GLOB_NOMATCH 3
+diff --git a/src/wrapped/wrappedlibc.c b/src/wrapped/wrappedlibc.c
+index 10c0f34d4..832ee5869 100644
+--- a/src/wrapped/wrappedlibc.c
++++ b/src/wrapped/wrappedlibc.c
+@@ -39,6 +39,11 @@ extern const char *const sys_siglist[] __asm__("__sys_siglist");
+ #include <fcntl.h>
+ #include <glob.h>
+ #include <ctype.h>
++#ifdef ANDROID
++#include <assert.h>
++#include <langinfo.h>
++#include "glibc_consts_android.h"
++#endif
+ #include <dirent.h>
+ #include <search.h>
+ #include <sys/types.h>
+@@ -2657,6 +2662,64 @@ EXPORT int32_t my_glob64(x64emu_t *emu, void* pat, int32_t flags, void* errfnc,
+     return glob64(pat, flags, findgloberrFct(errfnc), pglob);
+ }
+ EXPORT int32_t my_glob(x64emu_t *emu, void* pat, int32_t flags, void* errfnc, void* pglob) __attribute__((alias("my_glob64")));
++#else
++// glibc's glob_t layout and GLOB_* values differ from bionic's: run bionic glob, then hand the
++// guest its own copy of the result in glibc layout.
++typedef struct glibc_glob_s {
++    size_t gl_pathc;
++    char** gl_pathv;
++    size_t gl_offs;
++    int gl_flags;
++    void* gl_funcs[5];
++} glibc_glob_t;
++EXPORT int32_t my_glob(x64emu_t *emu, void* pat, int32_t flags, void* errfnc, void* pglob)
++{
++    (void)emu;
++    glibc_glob_t* g = pglob;
++    int nflags = 0;
++    if(flags&GLIBC_GLOB_ERR) nflags |= GLOB_ERR;
++    if(flags&GLIBC_GLOB_MARK) nflags |= GLOB_MARK;
++    if(flags&GLIBC_GLOB_NOSORT) nflags |= GLOB_NOSORT;
++    if(flags&GLIBC_GLOB_NOCHECK) nflags |= GLOB_NOCHECK;
++    if(flags&GLIBC_GLOB_NOESCAPE) nflags |= GLOB_NOESCAPE;
++    glob_t ng = {0};
++    int ret = glob(pat, nflags, (int (*)(const char*, int))findgloberrFct(errfnc), &ng);
++    // keep the previous results when appending, and reserve gl_offs leading NULLs when asked
++    size_t offs = (flags&GLIBC_GLOB_DOOFFS)?g->gl_offs:0;
++    size_t old = ((flags&GLIBC_GLOB_APPEND) && g->gl_pathv)?g->gl_pathc:0;
++    char** v = box_calloc(offs+old+ng.gl_pathc+1, sizeof(char*));
++    for(size_t i=0; i<old; ++i)
++        v[offs+i] = g->gl_pathv[offs+i];
++    for(size_t i=0; i<ng.gl_pathc; ++i)
++        v[offs+old+i] = box_strdup(ng.gl_pathv[i]);
++    if(old)
++        box_free(g->gl_pathv);
++    g->gl_pathc = old+ng.gl_pathc;
++    g->gl_pathv = v;
++    g->gl_offs = offs;
++    g->gl_flags = flags;
++    globfree(&ng);
++    switch(ret) {
++        case 0: return 0;
++        case GLOB_NOSPACE: return GLIBC_GLOB_NOSPACE;
++        case GLOB_ABORTED: return GLIBC_GLOB_ABORTED;
++        default: return GLIBC_GLOB_NOMATCH;
++    }
++}
++EXPORT int32_t my_glob64(x64emu_t *emu, void* pat, int32_t flags, void* errfnc, void* pglob) __attribute__((alias("my_glob")));
++EXPORT void my_globfree(x64emu_t* emu, void* pglob)
++{
++    (void)emu;
++    glibc_glob_t* g = pglob;
++    if(!g->gl_pathv)
++        return;
++    for(size_t i=0; i<g->gl_pathc; ++i)
++        box_free(g->gl_pathv[g->gl_offs+i]);
++    box_free(g->gl_pathv);
++    g->gl_pathv = NULL;
++    g->gl_pathc = 0;
++}
++EXPORT void my_globfree64(x64emu_t* emu, void* pglob) __attribute__((alias("my_globfree")));
+ #endif
+ 
+ EXPORT int my_scandir64(x64emu_t *emu, void* dir, void* namelist, void* sel, void* comp)
+@@ -3517,9 +3580,142 @@ void InitCpuModel()
+ #endif
+ 
+ #ifdef ANDROID
++// glibc-on-bionic: x86_64 glibc binaries (and their libstdc++) need glibc-only entry points and
++// glibc-shaped data that bionic doesn't have. Bionic only implements the C/C.UTF-8 locales, so the
++// locale and ctype emulation below only has to model the C locale.
++
++// glibc ctype tables, indexed -128..255 (EOF is -1). Bits as in glibc's <ctype.h> on little endian.
++enum { G_UPPER = 0x100, G_LOWER = 0x200, G_ALPHA = 0x400, G_DIGIT = 0x800, G_XDIGIT = 0x1000,
++       G_SPACE = 0x2000, G_PRINT = 0x4000, G_GRAPH = 0x8000, G_BLANK = 0x1, G_CNTRL = 0x2,
++       G_PUNCT = 0x4, G_ALNUM = 0x8 };
++static unsigned short glibc_ctype_b[384];
++static int32_t glibc_ctype_tolower[384];
++static int32_t glibc_ctype_toupper[384];
++static const unsigned short* glibc_ctype_b_ptr = glibc_ctype_b + 128;
++static const int32_t* glibc_ctype_tolower_ptr = glibc_ctype_tolower + 128;
++static const int32_t* glibc_ctype_toupper_ptr = glibc_ctype_toupper + 128;
++
+ void ctSetup()
+ {
++    for(int c=-128; c<256; ++c) {
++        unsigned short f = 0;
++        if(c>=0 && c<128) {
++            if(isupper(c)) f |= G_UPPER;
++            if(islower(c)) f |= G_LOWER;
++            if(isalpha(c)) f |= G_ALPHA;
++            if(isdigit(c)) f |= G_DIGIT;
++            if(isxdigit(c)) f |= G_XDIGIT;
++            if(isspace(c)) f |= G_SPACE;
++            if(isprint(c)) f |= G_PRINT;
++            if(isgraph(c)) f |= G_GRAPH;
++            if(isblank(c)) f |= G_BLANK;
++            if(iscntrl(c)) f |= G_CNTRL;
++            if(ispunct(c)) f |= G_PUNCT;
++            if(isalnum(c)) f |= G_ALNUM;
++        }
++        glibc_ctype_b[c+128] = f;
++        glibc_ctype_tolower[c+128] = (c>='A' && c<='Z')?(c+'a'-'A'):c;
++        glibc_ctype_toupper[c+128] = (c>='a' && c<='z')?(c-'a'+'A'):c;
++    }
++}
++EXPORT void* my___ctype_b_loc(x64emu_t* emu) { (void)emu; return &glibc_ctype_b_ptr; }
++EXPORT void* my___ctype_tolower_loc(x64emu_t* emu) { (void)emu; return &glibc_ctype_tolower_ptr; }
++EXPORT void* my___ctype_toupper_loc(x64emu_t* emu) { (void)emu; return &glibc_ctype_toupper_ptr; }
++
++// glibc's locale_t is a pointer to this struct, and libstdc++ reads the __ctype_* fields directly.
++typedef struct glibc_locale_s {
++    void* locales[13];
++    const unsigned short* ctype_b;
++    const int32_t* ctype_tolower;
++    const int32_t* ctype_toupper;
++    const char* names[13];
++} glibc_locale_t;
++#define GLIBC_LC_GLOBAL_LOCALE ((glibc_locale_t*)-1L)
++static __thread glibc_locale_t* glibc_cur_locale = GLIBC_LC_GLOBAL_LOCALE;
++
++static glibc_locale_t* new_c_locale()
++{
++    glibc_locale_t* l = box_calloc(1, sizeof(glibc_locale_t));
++    l->ctype_b = glibc_ctype_b_ptr;
++    l->ctype_tolower = glibc_ctype_tolower_ptr;
++    l->ctype_toupper = glibc_ctype_toupper_ptr;
++    for(int i=0; i<13; ++i)
++        l->names[i] = "C";
++    return l;
++}
++EXPORT void* my_newlocale(x64emu_t* emu, int mask, void* name, void* base)
++{
++    (void)emu; (void)mask; (void)name;
++    return base?base:new_c_locale();    // every locale behaves as "C" on bionic anyway
++}
++EXPORT void* my___newlocale(x64emu_t* emu, int mask, void* name, void* base) __attribute__((alias("my_newlocale")));
++EXPORT void* my_duplocale(x64emu_t* emu, void* loc)
++{
++    (void)emu;
++    glibc_locale_t* l = new_c_locale();
++    if(loc && loc!=GLIBC_LC_GLOBAL_LOCALE)
++        memcpy(l, loc, sizeof(glibc_locale_t));
++    return l;
++}
++EXPORT void* my___duplocale(x64emu_t* emu, void* loc) __attribute__((alias("my_duplocale")));
++EXPORT void my_freelocale(x64emu_t* emu, void* loc)
++{
++    (void)emu;
++    if(loc && loc!=GLIBC_LC_GLOBAL_LOCALE)
++        box_free(loc);
++}
++EXPORT void my___freelocale(x64emu_t* emu, void* loc) __attribute__((alias("my_freelocale")));
++EXPORT void* my_uselocale(x64emu_t* emu, void* loc)
++{
++    (void)emu;
++    glibc_locale_t* old = glibc_cur_locale;
++    if(loc)
++        glibc_cur_locale = loc;
++    return old;
+ }
++EXPORT void* my___uselocale(x64emu_t* emu, void* loc) __attribute__((alias("my_uselocale")));
++
++static int glibc_to_native(const int (*map)[2], size_t n, int value)
++{
++    for(size_t i=0; i<n; ++i)
++        if(map[i][0]==value)
++            return map[i][1];
++    return -1;
++}
++EXPORT void* my_nl_langinfo(x64emu_t* emu, int item)
++{
++    (void)emu;
++    int native = glibc_to_native(glibc_nl_map, sizeof(glibc_nl_map)/sizeof(glibc_nl_map[0]), item);
++    return (native==-1)?"":nl_langinfo(native);
++}
++EXPORT void* my_nl_langinfo_l(x64emu_t* emu, int item, void* loc) { (void)loc; return my_nl_langinfo(emu, item); }
++EXPORT void* my___nl_langinfo_l(x64emu_t* emu, int item, void* loc) __attribute__((alias("my_nl_langinfo_l")));
++
++EXPORT void my___assert_fail(x64emu_t* emu, void* assertion, void* file, uint32_t line, void* function)
++{
++    (void)emu;
++    __assert2(file, line, function, assertion);
++}
++
++EXPORT void my_explicit_bzero(x64emu_t* emu, void* s, size_t n)
++{
++    (void)emu;
++    memset(s, 0, n);
++    __asm__ __volatile__("" : : "r"(s) : "memory");
++}
++
++// No message catalogs on Android: gettext returns the untranslated text.
++EXPORT void* my_gettext(x64emu_t* emu, void* msgid) { (void)emu; return msgid; }
++EXPORT void* my_dgettext(x64emu_t* emu, void* domain, void* msgid) { (void)emu; (void)domain; return msgid; }
++EXPORT void* my___dgettext(x64emu_t* emu, void* domain, void* msgid) __attribute__((alias("my_dgettext")));
++EXPORT void* my_dcgettext(x64emu_t* emu, void* domain, void* msgid, int cat) { (void)emu; (void)domain; (void)cat; return msgid; }
++EXPORT void* my___dcgettext(x64emu_t* emu, void* domain, void* msgid, int cat) __attribute__((alias("my_dcgettext")));
++EXPORT void* my_ngettext(x64emu_t* emu, void* msgid1, void* msgid2, unsigned long n) { (void)emu; return (n==1)?msgid1:msgid2; }
++EXPORT void* my_dngettext(x64emu_t* emu, void* domain, void* msgid1, void* msgid2, unsigned long n) { (void)domain; return my_ngettext(emu, msgid1, msgid2, n); }
++EXPORT void* my_dcngettext(x64emu_t* emu, void* domain, void* msgid1, void* msgid2, unsigned long n, int cat) { (void)domain; (void)cat; return my_ngettext(emu, msgid1, msgid2, n); }
++EXPORT void* my_bindtextdomain(x64emu_t* emu, void* domain, void* dir) { (void)emu; (void)domain; return dir?dir:"/usr/share/locale"; }
++EXPORT void* my_bind_textdomain_codeset(x64emu_t* emu, void* domain, void* codeset) { (void)emu; (void)domain; return codeset; }
++EXPORT void* my_textdomain(x64emu_t* emu, void* domain) { (void)emu; return domain?domain:"messages"; }
+ #else
+ EXPORT const unsigned short int *my___ctype_b;
+ EXPORT const int32_t *my___ctype_tolower;
+@@ -5285,6 +5481,14 @@ EXPORT int my_getpagesize(x64emu_t* emu) {
+ EXPORT int my___getpagesize(x64emu_t* emu) __attribute__((alias("my_getpagesize")));
+ 
+ EXPORT long my_sysconf(x64emu_t* emu, int what) {
++    #ifdef ANDROID
++    // the guest passes glibc's _SC_* numbers, bionic numbers them differently
++    what = glibc_to_native(glibc_sc_map, sizeof(glibc_sc_map)/sizeof(glibc_sc_map[0]), what);
++    if(what==-1) {
++        errno = EINVAL;
++        return -1;
++    }
++    #endif
+     if(what==_SC_PAGESIZE) {
+         return X86_PAGE_SIZE;
+     }
+diff --git a/src/wrapped/wrappedlibc_private.h b/src/wrapped/wrappedlibc_private.h
+index 84a7e7e68..03332d320 100644
+--- a/src/wrapped/wrappedlibc_private.h
++++ b/src/wrapped/wrappedlibc_private.h
+@@ -54,7 +54,11 @@ GOM(__asprintf, iFEppV)
+ GOWM(asprintf, iFEppV)
+ GOM(__asprintf_chk, iFEpipV)
+ GO(__assert, vFppi)
++#ifdef ANDROID
++GOM(__assert_fail, vFEppup)
++#else
+ GO(__assert_fail, vFppup)
++#endif
+ GO(__assert_perror_fail, vFipup)
+ GOM(atexit, iFEp)
+ GOM(at_quick_exit, iFEp)
+@@ -75,14 +79,30 @@ GOWM(backtrace, iFEpi)
+ GOWM(backtrace_symbols, pFEpi)
+ //GO(__backtrace_symbols_fd, 
+ GOWM(backtrace_symbols_fd, vFEpii)
++#ifdef ANDROID
++GO2(basename, pFp, __gnu_basename)
++#else
+ GOW(basename, pFp)
++#endif
++#ifdef ANDROID
++GO2(bcmp, iFppL, memcmp)
++#else
+ GO(bcmp, iFppL)
++#endif
+ GO(bcopy, vFppL)
+ //GO(bdflush, 
+ GOW(bind, iFipu)
+ GO(bindresvport, iFip)
++#ifdef ANDROID
++GOM(bindtextdomain, pFEpp)
++#else
+ GOW(bindtextdomain, pFpp)
++#endif
++#ifdef ANDROID
++GOM(bind_textdomain_codeset, pFEpp)
++#else
+ GOW(bind_textdomain_codeset, pFpp)
++#endif
+ GOW(brk, iFp)
+ //GO(__bsd_getpgrp, 
+ GO2(bsd_signal, pFEip, my_signal)
+@@ -218,13 +238,25 @@ DATA(_ctype_, 8)
+ #else
+ DATA(__ctype_b, 8)
+ #endif
++#ifdef ANDROID
++GOM(__ctype_b_loc, pFEv)
++#else
+ GO(__ctype_b_loc, pFv)
++#endif
+ GO(__ctype_get_mb_cur_max, LFv)
+ //GO(__ctype_init, 
+ DATAM(__ctype_tolower, 8)
++#ifdef ANDROID
++GOM(__ctype_tolower_loc, pFEv)
++#else
+ GO(__ctype_tolower_loc, pFv)
++#endif
+ DATAM(__ctype_toupper, 8)
++#ifdef ANDROID
++GOM(__ctype_toupper_loc, pFEv)
++#else
+ GO(__ctype_toupper_loc, pFv)
++#endif
+ //DATAB(__curbrk, 
+ GO(cuserid, pFp)
+ GOM(__cxa_atexit, iFEppp)
+@@ -236,9 +268,21 @@ GOM(__cxa_thread_atexit_impl, iFEppp)
+ GO(daemon, iFii)
+ DATAB(__daylight, 4)
+ DATA(daylight, 4)
++#ifdef ANDROID
++GOM(__dcgettext, pFEppi)
++#else
+ GO(__dcgettext, pFppi)
++#endif
++#ifdef ANDROID
++GOM(dcgettext, pFEppi)
++#else
+ GOW(dcgettext, pFppi)
++#endif
++#ifdef ANDROID
++GOM(dcngettext, pFEpppLi)
++#else
+ GOW(dcngettext, pFpppLi)
++#endif
+ //GO(__default_morecore, 
+ #ifdef STATICBUILD
+ //GO(delete_module, 
+@@ -247,8 +291,16 @@ GOW(dcngettext, pFpppLi)
+ GOM(delete_module, iFEpu)
+ GO(des_setparity, vFp)
+ #endif
++#ifdef ANDROID
++GOM(__dgettext, pFEpp)
++#else
+ GO(__dgettext, pFpp)
++#endif
++#ifdef ANDROID
++GOM(dgettext, pFEpp)
++#else
+ GOW(dgettext, pFpp)
++#endif
+ GO(difftime, dFll)
+ GO(dirfd, iFp)
+ GO(dirname, pFp)
+@@ -269,7 +321,11 @@ GO(_dl_mcount_wrapper_check, vFp)
+ //GO(_dl_signal_exception, 
+ //GO(_dl_sym, 
+ //GO(_dl_vsym, 
++#ifdef ANDROID
++GOM(dngettext, pFEpppL)
++#else
+ GOW(dngettext, pFpppL)
++#endif
+ GOW(dn_skipname, iFpp)
+ GOM(dprintf, iFEipV)
+ GOM(__dprintf_chk, iFEiipV)
+@@ -279,8 +335,16 @@ GOW(dup, iFi)
+ GO(__dup2, iFii)
+ GOW(dup2, iFii)
+ GOW(dup3, iFiiO)
++#ifdef ANDROID
++GOM(__duplocale, pFEp)
++#else
+ GO(__duplocale, pFp)
++#endif
++#ifdef ANDROID
++GOM(duplocale, pFEp)
++#else
+ GOW(duplocale, pFp)
++#endif
+ GO(dysize, iFi)
+ GOW(eaccess, iFpi)
+ #ifdef STATICBUILD
+@@ -337,7 +401,11 @@ GO(erand48, dFp)
+ GOW(erand48_r, iFppp)
+ GOM(err, vFEipV)
+ //DATAB(errno, 
++#ifdef ANDROID
++GO2(__errno_location, pFv, __errno)
++#else
+ GO(__errno_location, pFv)
++#endif
+ GOWM(error, vFEiipV)
+ GOWM(error_at_line, vFEiipupV)
+ //DATAB(error_message_count, 4)
+@@ -375,7 +443,11 @@ GOWM(execvpe, iFEppp)
+ GOM(_exit, vFEi)
+ GOM(exit, vFEi)
+ GOW(_Exit, vFi)
++#ifdef ANDROID
++GOM(explicit_bzero, vFEpL)
++#else
+ GO(explicit_bzero, vFpL)
++#endif
+ GO(__explicit_bzero_chk, vFpLL)
+ GO(faccessat, iFipii)
+ GOW(fallocate, iFiill)
+@@ -493,8 +565,16 @@ GO(free_sized, vFpL)
+ #endif
+ GO(freeaddrinfo, vFp)
+ GOW(freeifaddrs, vFp)
++#ifdef ANDROID
++GOM(__freelocale, vFEp)
++#else
+ GO(__freelocale, vFp)
++#endif
++#ifdef ANDROID
++GOM(freelocale, vFEp)
++#else
+ GOW(freelocale, vFp)
++#endif
+ GO(fremovexattr, iFip)
+ GO(freopen, SFppS)
+ GO(freopen64, SFppS)
+@@ -749,7 +829,11 @@ GO(getspent_r, iFppLp)
+ GO(getspnam, pFp)
+ GO(getspnam_r, iFpppLp)
+ GO(getsubopt, iFppp)
++#ifdef ANDROID
++GOM(gettext, pFEp)
++#else
+ GOW(gettext, pFp)
++#endif
+ GOW(gettid, iFv)
+ GO(__gettimeofday, iFpp)
+ GO(gettimeofday, iFpp)
+@@ -782,8 +866,16 @@ GO(__getwd_chk, pFpL)
+ GO(getxattr, lFpppL)
+ GOM(glob, iFEpipp)
+ GOM(glob64, iFEpipp)
++#ifdef ANDROID
++GOM(globfree, vFEp)
++#else
+ GO(globfree, vFp)
++#endif
++#ifdef ANDROID
++GOM(globfree64, vFEp)
++#else
+ GOW(globfree64, vFp)
++#endif
+ GOW(glob_pattern_p, iFpi)
+ GO(gmtime, pFp)
+ GO(__gmtime_r, pFpp)
+@@ -1110,7 +1202,11 @@ GOW(iswcntrl, iFu)
+ GOW(iswcntrl_l, iFup)
+ //GO(__iswctype, 
+ GOW(iswctype, iFuL)
++#ifdef ANDROID
++GO2(__iswctype_l, iFuLL, iswctype_l)
++#else
+ GO(__iswctype_l, iFuLL)
++#endif
+ GOW(iswctype_l, iFuLp)
+ GOW(iswdigit, iFu)
+ //GO(__iswdigit_l, 
+@@ -1431,17 +1527,41 @@ GOW(nanosleep, iFpp)
+ GO(netname2host, iFppi)
+ GO(netname2user, iFppppp)
+ #endif
++#ifdef ANDROID
++GOM(__newlocale, pFEipp)
++#else
+ GO(__newlocale, pFipp)
++#endif
++#ifdef ANDROID
++GOM(newlocale, pFEipp)
++#else
+ GOW(newlocale, pFipp)
++#endif
+ //GO(nfsservctl, 
+ GOM(nftw, iFEppii)
+ GOM(nftw64, iFEppii)
++#ifdef ANDROID
++GOM(ngettext, pFEppL)
++#else
+ GOW(ngettext, pFppL)
++#endif
+ GO(nice, iFi)
+ //DATAB(_nl_domain_bindings, 
++#ifdef ANDROID
++GOM(nl_langinfo, pFEi)
++#else
+ GO(nl_langinfo, pFi)
++#endif
++#ifdef ANDROID
++GOM(__nl_langinfo_l, pFEip)
++#else
+ GO(__nl_langinfo_l, pFip)
++#endif
++#ifdef ANDROID
++GOM(nl_langinfo_l, pFEip)
++#else
+ GOW(nl_langinfo_l, pFip)
++#endif
+ DATAB(_nl_msg_cat_cntr, 4)
+ GO(nrand48, lFp)
+ GOW(nrand48_r, iFppp)
+@@ -2015,7 +2135,11 @@ GO(strchr, pFpi)
+ GO(strchrnul, pFpi)
+ GO(strcmp, iFpp)
+ GO(strcoll, iFpp)
++#ifdef ANDROID
++GO2(__strcoll_l, iFppp, strcoll_l)
++#else
+ GO(__strcoll_l, iFppp)
++#endif
+ GOW(strcoll_l, iFppp)
+ GO(strcpy, pFpp)
+ GO(__strcpy_chk, pFppL)
+@@ -2030,8 +2154,16 @@ GO(strerror, pFi)
+ GOW(strerrorname_np, pFi)
+ GOW(strerrordesc_np, pFi)
+ GO(strerror_l, pFip)
++#ifdef ANDROID
++GO2(__strerror_r, pFipL, __gnu_strerror_r)
++#else
+ GO(__strerror_r, pFipL)
++#endif
++#ifdef ANDROID
++GO2(strerror_r, pFipL, __gnu_strerror_r)
++#else
+ GO(strerror_r, pFipL)
++#endif
+ #ifdef STATICBUILD
+ //GO(strfmon, lFpLpV)
+ //GO(__strfmon_l, 
+@@ -2050,7 +2182,11 @@ GOD(strfromf64x, iFpLpD, strfromf32x)
+ GOD(strfroml, iFpLpD, strfromd)
+ GO(strfry, pFp)
+ GO(strftime, LFpLpp)
++#ifdef ANDROID
++GO2(__strftime_l, LFpLppL, strftime_l)
++#else
+ GO(__strftime_l, LFpLppL)
++#endif
+ GOW(strftime_l, LFpLppp)
+ GO(strlen, LFp)
+ GO(__strlcpy_chk, LFppLL)
+@@ -2084,7 +2220,11 @@ GO(strspn, LFpp)
+ GO(strstr, pFpp)
+ GO(strtod, dFpp)
+ GO(__strtod_internal, dFppi)
++#ifdef ANDROID
++GO2(__strtod_l, dFppp, strtod_l)
++#else
+ GO(__strtod_l, dFppp)
++#endif
+ GOW(strtod_l, dFppp)
+ //GO(__strtod_nan, 
+ GO(strtof, fFpp)
+@@ -2101,7 +2241,11 @@ GOW(strtof64_l, dFppp)
+ GOWD(strtof64x, DFpp, strtof32x)
+ GOWD(strtof64x_l, DFppp, strtof32x_l)
+ GO(__strtof_internal, fFppi)
++#ifdef ANDROID
++GO2(__strtof_l, fFppp, strtof_l)
++#else
+ GO(__strtof_l, fFppp)
++#endif
+ GOW(strtof_l, fFppp)
+ //GO(__strtof_nan, 
+ GO(strtoimax, IFppi)
+@@ -2144,7 +2288,11 @@ GOW(strtouq, UFppi)
+ //GO(__strverscmp, 
+ GOW(strverscmp, iFpp)
+ GO(strxfrm, LFppL)
++#ifdef ANDROID
++GO2(__strxfrm_l, LFppLL, strxfrm_l)
++#else
+ GO(__strxfrm_l, LFppLL)
++#endif
+ GO(strxfrm_l, LFppLp)
+ //GO(stty, 
+ #ifdef STATICBUILD
+@@ -2261,7 +2409,11 @@ GOWM(tdestroy, vFEpp)
+ GO(tee, lFiiLu)
+ GO(telldir, lFp)
+ GO(tempnam, pFpp)
++#ifdef ANDROID
++GOM(textdomain, pFEp)
++#else
+ GOW(textdomain, pFp)
++#endif
+ //GO(__tfind, 
+ GOWM(tfind, pFEppp)
+ GOW(tgkill, iFiii)
+@@ -2323,10 +2475,18 @@ GOW(towctrans, uFup)
+ //GO(__towctrans_l, 
+ GOW(towctrans_l, uFupp)
+ GOW(towlower, uFu)
++#ifdef ANDROID
++GO2(__towlower_l, iFip, towlower_l)
++#else
+ GO(__towlower_l, iFip)
++#endif
+ GOW(towlower_l, uFup)
+ GOW(towupper, uFu)
++#ifdef ANDROID
++GO2(__towupper_l, iFip, towupper_l)
++#else
+ GO(__towupper_l, iFip)
++#endif
+ GOW(towupper_l, uFup)
+ //GO(tr_break, 
+ GO(truncate, iFpl)
+@@ -2366,8 +2526,16 @@ GO(unshare, iFi)
+ GOW(updwtmp, vFpp)
+ GO(updwtmpx, vFpp)
+ //GO(uselib, 
++#ifdef ANDROID
++GOM(__uselocale, pFEp)
++#else
+ GO(__uselocale, pFp)
++#endif
++#ifdef ANDROID
++GOM(uselocale, pFEp)
++#else
+ GOW(uselocale, pFp)
++#endif
+ #ifdef STATICBUILD
+ //GO(user2netname, 
+ #else
+@@ -2446,14 +2614,22 @@ GO(wcschr, pFpi)
+ GO(wcschrnul, pFpi)
+ GO(wcscmp, iFpp)
+ GOW(wcscoll, iFpp)
++#ifdef ANDROID
++GO2(__wcscoll_l, iFppp, wcscoll_l)
++#else
+ GO(__wcscoll_l, iFppp)
++#endif
+ GOW(wcscoll_l, iFppp)
+ GO(wcscpy, pFpp)
+ GO(__wcscpy_chk, pFppL)
+ GO(wcscspn, LFpp)
+ GO(wcsdup, pFp)
+ GO(wcsftime, LFpLpp)
++#ifdef ANDROID
++GO2(__wcsftime_l, LFpLppp, wcsftime_l)
++#else
+ GO(__wcsftime_l, LFpLppp)
++#endif
+ GO(wcsftime_l, LFpLppp)
+ GO(wcslen, LFp)
+ GO(wcsncasecmp, iFppL)
+@@ -2532,7 +2708,11 @@ GOW(wcstouq, UFppi)
+ GOW(wcswcs, pFpp)
+ GO(wcswidth, iFpL)
+ GO(wcsxfrm, LFppL)
++#ifdef ANDROID
++GO2(__wcsxfrm_l, LFppLL, wcsxfrm_l)
++#else
+ GO(__wcsxfrm_l, LFppLL)
++#endif
+ GO(wcsxfrm_l, LFppLp)
+ GO(wctob, iFu)
+ GO(wctomb, iFpi)
+@@ -2542,7 +2722,11 @@ GOW(wctrans, pFp)
+ GOW(wctrans_l, pFpp)
+ GOW(wctype, LFp)
+ GOW(wctype_l, LFpp)
++#ifdef ANDROID
++GO2(__wctype_l, LFpp, wctype_l)
++#else
+ GO(__wctype_l, LFpp)
++#endif
+ GO(wcwidth, iFi)
+ GO(wmemchr, pFpiL)
+ GO(wmemcmp, iFppL)
+@@ -2716,9 +2900,17 @@ GO(xdr_void, iFv)
+ GOM(__xmknod, iFEipup)
+ GOM(__xmknodat, iFEiipup)
+ #endif
++#ifdef ANDROID
++GO2(__xpg_basename, pFp, basename)
++#else
+ GO(__xpg_basename, pFp)
++#endif
+ GOW(__xpg_sigpause, iFi)
++#ifdef ANDROID
++GO2(__xpg_strerror_r, iFipL, strerror_r)
++#else
+ GO(__xpg_strerror_r, pFipL)
++#endif
+ //GOM(xprt_register, vFp)
+ //GOM(xprt_unregister, vFp)
+ GOM(__xstat, iFEipp)
+diff --git a/src/wrapped/wrappedlibgl.c b/src/wrapped/wrappedlibgl.c
+index f813ef2c9..94466c1d4 100644
+--- a/src/wrapped/wrappedlibgl.c
++++ b/src/wrapped/wrappedlibgl.c
+@@ -180,10 +180,9 @@ static void* find_get_blob_func_Fct(void* fct)
+ #undef SUPER
+ 
+ #define PRE_INIT                                                                \
+-    if(BOX64ENV(libgl)) {                                                       \
+-        lib->w.lib = dlopen(BOX64ENV(libgl), RTLD_LAZY | RTLD_GLOBAL);          \
++    if(BOX64ENV(libgl) && (lib->w.lib = dlopen(BOX64ENV(libgl), RTLD_LAZY | RTLD_GLOBAL))) \
+         lib->path = strdup(BOX64ENV(libgl));                                    \
+-    }
++    else
+ 
+ #include "wrappedlib_init.h"
+ 
+diff --git a/src/wrapped/wrappedlibpthread.c b/src/wrapped/wrappedlibpthread.c
+index 91330f299..11012a340 100644
+--- a/src/wrapped/wrappedlibpthread.c
++++ b/src/wrapped/wrappedlibpthread.c
+@@ -62,6 +62,29 @@ EXPORT void my___pthread_initialize()
+     // nothing, the lib initialize itself now
+ }
+ 
++#ifdef ANDROID
++// bionic has no thread cancellation: report the glibc defaults (enabled, deferred) and never cancel
++EXPORT int my_pthread_setcancelstate(x64emu_t* emu, int state, int* oldstate)
++{
++    (void)emu; (void)state;
++    if(oldstate) *oldstate = 0;
++    return 0;
++}
++EXPORT int my_pthread_setcanceltype(x64emu_t* emu, int type, int* oldtype)
++{
++    (void)emu; (void)type;
++    if(oldtype) *oldtype = 0;
++    return 0;
++}
++EXPORT void my_pthread_testcancel(x64emu_t* emu) { (void)emu; }
++EXPORT int my_pthread_cancel(x64emu_t* emu, uintptr_t thread)
++{
++    (void)emu; (void)thread;
++    printf_log(LOG_INFO, "Warning, pthread_cancel is not supported on Android, ignored\n");
++    return ENOSYS;
++}
++#endif
++
+ #ifdef STATICBUILD
+ #include <semaphore.h>
+ #include <signal.h>
+diff --git a/src/wrapped/wrappedlibpthread_private.h b/src/wrapped/wrappedlibpthread_private.h
+index 566ce8b6c..56e296bcf 100644
+--- a/src/wrapped/wrappedlibpthread_private.h
++++ b/src/wrapped/wrappedlibpthread_private.h
+@@ -88,7 +88,11 @@ GO(pthread_barrier_init, iFppu)
+ GOM(pthread_barrier_init, iFEppu)
+ #endif
+ GO(pthread_barrier_wait, iFp)
++#ifdef ANDROID
++GOM(pthread_cancel, iFEL)
++#else
+ GO(pthread_cancel, iFL)
++#endif
+ GO(pthread_clockjoin_np, iFppip)
+ GOM(_pthread_cleanup_pop, vFEpi)
+ GOM(_pthread_cleanup_pop_restore, vFEpi)
+@@ -251,8 +255,16 @@ GO(pthread_rwlock_wrlock, iFp)
+ GO(pthread_self, LFv)
+ GO2(pthread_setaffinity_np@GLIBC_2.3.3, iFEpp, my_pthread_setaffinity_np_old)
+ GOM(pthread_setaffinity_np, iFEpLp)
++#ifdef ANDROID
++GOM(pthread_setcancelstate, iFEip)
++#else
+ GO(pthread_setcancelstate, iFip)
++#endif
++#ifdef ANDROID
++GOM(pthread_setcanceltype, iFEip)
++#else
+ GO(pthread_setcanceltype, iFip)
++#endif
+ GO(pthread_setconcurrency, iFi)
+ GO(pthread_setname_np, iFpp)
+ GO(pthread_setschedparam, iFLip)
+@@ -265,7 +277,11 @@ GO(pthread_spin_init, iFpi)
+ GO(pthread_spin_lock, iFp)
+ GO(pthread_spin_trylock, iFp)
+ GO(pthread_spin_unlock, iFp)
++#ifdef ANDROID
++GOM(pthread_testcancel, vFEv)
++#else
+ GO(pthread_testcancel, vFv)
++#endif
+ GO(pthread_timedjoin_np, iFppp)
+ GO(pthread_tryjoin_np, iFpp)
+ GOM(__pthread_unregister_cancel, vFEp)
