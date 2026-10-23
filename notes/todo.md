@@ -879,3 +879,36 @@ Goal: any phone needs only the APK and GOG's Linux installer (`darkest_dungeon_2
 
 ## Next: import and export saves
 - [ ] Copy the game's saves (`files/.local/share/Red Hook Studios/Darkest`) out of and into the app through the system file picker, so they survive an uninstall and can move between devices.
+
+## Steam copy (2026-10-23)
+Steam's Linux depots ship the same DRM-free `_linuxnosteam` build as GOG (Build 28212, GOG's is 27988). Copied to the OnePlus 5 by hand, it reached the title, the save list and the dungeon at 60 FPS on 0.3.1, and it reads the GOG saves.
+- **Depots (app 262060):**
+  - 262065 holds the binaries: `_linux` (needs Steam) and `_linuxnosteam`. Its lib64 is byte-identical to GOG's.
+  - 262066 holds the data, plus the Windows/Xbox-only `__build` and `_xb1`. The six patched shaders are byte-identical to GOG's.
+  - The DLC depots unpack into `dlc/<id>_<name>/`: 445702 Musketeer, 580102 Crimson Court, 702542 Shieldbreaker, 735732 Color of Madness, 1117862 The Pit and 4964111 Fire's Edge.
+- **Driving Steam from a script:**
+  - `steam.exe +download_depot 262060 <id>` hands the command to the running, logged-in client; no console, no typing.
+  - The download lands in `<Steam>\steamapps\content\app_262060\depot_<id>`.
+  - `<Steam>\logs\console_log.txt` gets `Depot download complete : "<path>" …` or `Depot download failed : <reason>`.
+- [x] `port/steam/get-steam-game.bat`: downloads the depots through the running Steam, then writes `darkest-dungeon-steam.zip` (the game at its root).
+  - Plain batch, using reg, tasklist, findstr, choice and `tar`. A first version in PowerShell (`iex` with `-ExecutionPolicy Bypass`) was dropped, because antiviruses flag that pattern.
+  - `tar` deflates at level 1, because its stored entries carry data descriptors, which `ZipInputStream` rejects.
+  - Unowned DLC depots fail with `missing license for depot (No subscription)` and are skipped.
+  - 1117862 is The Butcher's Circus (`dlc/1117860_arena_mp`).
+- [x] Import (`DDActivity.unpackGame`/`zipStart`) also takes a plain zip: the game at the root, zip64-safe start, and free space by the zip's size.
+- [x] README: a Steam route.
+- **Review (OnePlus 5, debug 0.3.1 build):**
+  - **The bat:** on this account it got the base game, The Musketeer and The Butcher's Circus; the other four DLCs aren't owned. The batch version took 1 min 46 s in total, including a fresh download of the 1.5 GB data depot and about 50 s of packing. Its zip holds the same 9,706 files (2.91 GB unpacked) in 2.38 GB. The PowerShell version's uncompressed zip was 2.91 GB.
+  - **The zip:** Java's `ZipInputStream` on the PC reads all 9,706 files, and the folders the phone doesn't need (`__build`, `_xb1`, `_linux`) aren't in it.
+  - **Phone tests:** the `tar` zip imported in 2 min 46 s (9,712 files, both DLC folders); the title showed Build 28212, and the save list showed "DLC Disabled". The rest below used the PowerShell version's zip.
+  - **Steam import on the phone:**
+    - the zip, picked in the system file picker, imported in 2 min 52 s (9,706 files plus the 6 shader backups);
+    - the title showed Build 28212;
+    - on the earlier hand-copied files, the dungeon ran at 60 FPS.
+  - **DLC:** the saves now carry "DLC Disabled", and loading one opens the game's "Activate DLC" dialog with The Butcher's Circus and Musketeer. It was closed without activating; playing with DLC is not tested.
+  - **GOG import still works:** 2 min 14 s, 8,267 files, title Build 27987.
+  - **Saves:** a save rewritten by Steam's 28212 loads on GOG's 27987.
+  - **Not verified:**
+    - the bat's Y/N cleanup question in a real console (the test ran with empty stdin);
+    - a clean double-click on another PC;
+    - DLCs in play, and The Butcher's Circus PvP, which normally goes through Steam.

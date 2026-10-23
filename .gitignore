@@ -9,3 +9,5 @@
 # Gradle state (builds run from a copy under C:\dd-build, see port/apk/build-apk.sh)
 port/apk/.gradle/
 port/apk/local.properties
+# zip made by running port/steam/get-steam-game.bat in place
+port/steam/*.zip

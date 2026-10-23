@@ -59,3 +59,12 @@ Project rules learned from mistakes made during the port.
 - The normal way is the app's own import: open it, tap "Import game" and pick GOG's Linux installer. It unpacks the game and patches the shaders itself. The steps below are the fallback by adb.
 - `adb push` into `/sdcard/Android/data/<pkg>/files/` leaves folders owned by `shell` with mode `rws---`, which the app can't open ("game data missing"), although `run-as` can read them. Push, then copy the folder as the app: `run-as org.ddport.darkest cp -r <pushed> <files>/game` (2.3 GB in ~14 s), and delete the pushed copy. Then run `patch-shaders.sh` (now in `port/apk/app/src/main/assets/`) the same way (`run-as ... sh /data/local/tmp/patch-shaders.sh <game>`), or shaders fail to compile.
 - Read the game log with `run-as org.ddport.darkest cat files/dd.log` (debug builds only; release builds are not debuggable, so `run-as` refuses them).
+
+## Windows scripts (port/steam)
+- `get-steam-game.bat` is plain batch, with no PowerShell. A `.bat` that runs PowerShell with `-ExecutionPolicy Bypass` and `iex` is a classic malware-loader pattern that antiviruses flag, and Windows has every needed tool built in: reg, tasklist, findstr, choice and tar.
+- Call `find` and `tar` by full path (`%SystemRoot%\System32\...`). Run from Git Bash, or on a PC whose PATH puts Git, Cygwin or MSYS first, a bare `find` is the Unix one; the Steam check then fails ("find: 'REG_SZ': No such file").
+- Inside a `( )` block, a `%path%` that holds `Program Files (x86)` ends the block at its `)`. Write such lines unblocked, e.g. `>> file echo(%PATH_VAR%`.
+- Windows `tar` (bsdtar) writes zip entries with data descriptors (flag 8). Java's `ZipInputStream` rejects STORED entries that have one, so `zip:compression=store` can't be imported; deflate entries are fine. Use `zip:compression-level=1`: 49 s and 2.38 GB for the whole Steam game with two DLCs, against 55 s at the default level. Check any new zip writer with `ZipInputStream` on the PC.
+- `tar -T list` accepts `-C` and a folder on their own lines, so one list can merge several depot folders into one zip.
+- Run a `.bat` from Git Bash as `cmd //c "$(cygpath -w <path>)"`; a bare name fails with "not recognized" when the bat isn't in cmd's current folder.
+- Python edits to Windows paths: a backslash-t in a normal string literal is a tab (`System32\tar.exe` broke this way, twice). Use raw strings, or edit the file directly in an editor.

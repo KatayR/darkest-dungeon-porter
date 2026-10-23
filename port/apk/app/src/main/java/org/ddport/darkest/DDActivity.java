@@ -45,6 +45,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
+import java.util.Locale;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.stream.Stream;
@@ -55,8 +56,8 @@ import java.util.zip.ZipInputStream;
  * Runs the Linux x86_64 Darkest Dungeon in a child process (native/host: box64 + the game) and shows
  * its frames (native/ddview). The game can't run in this process: ART's heap occupies the fixed
  * addresses the game binary needs. Game data is never part of the APK: the app imports it from GOG's
- * Linux installer into getExternalFilesDir()/game (see importGame), and runs it through a private
- * mirror (see mirrorGame).
+ * Linux installer, or from the Steam zip that port/steam/get-steam-game.bat makes, into
+ * getExternalFilesDir()/game (see importGame), and runs it through a private mirror (see mirrorGame).
  *
  * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
  * extras "height" and "fps" skip it.
@@ -74,7 +75,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final int SCANCODE_ESCAPE = 41;   // SDL_SCANCODE_ESCAPE
     private static final int PICK_INSTALLER = 1;     // request code of the file picker
     private static final String INSTALLER_GAME = "data/noarch/game/";   // the game folder inside the installer
-    private static final long GAME_BYTES = 2_500_000_000L;               // it holds 2.35 GB
+    private static final long GAME_BYTES = 2_500_000_000L;               // it holds 2.35 GB (more with DLCs)
 
     static {
         System.loadLibrary("ddview");
@@ -177,7 +178,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return layout;
     }
 
-    /** Shown while the game is missing: GOG's Linux installer is picked here and imported. */
+    /** Shown while the game is missing: GOG's Linux installer or the Steam zip is picked here and imported. */
     private void showImportScreen(String error) {
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
         Button pick = new Button(c);
@@ -187,7 +188,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), PICK_INSTALLER));
         LinearLayout layout = column(c);
         layout.addView(label(c, "The game isn't installed yet. Pick GOG's Linux installer of Darkest Dungeon\n"
-                + "(darkest_dungeon_…_linux_….sh) from this device's storage."));
+                + "(darkest_dungeon_…_linux_….sh), or darkest-dungeon-steam.zip made by get-steam-game.bat\n"
+                + "(Steam), from this device's storage."));
         if (error != null)
             layout.addView(label(c, error));
         LinearLayout.LayoutParams lp = wrap();
@@ -397,26 +399,30 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Unpacks data/noarch/game/ of GOG's Linux installer (a shell script followed by a zip) into
-     * game.import/, patches its shaders and renames it to game/, so a half-finished import is never
-     * taken for the game. The zip is streamed from where it starts in the file, never copied.
+     * Unpacks the game into game.import/, patches its shaders and renames it to game/, so a
+     * half-finished import is never taken for the game. GOG's Linux installer is a shell script
+     * followed by a zip that holds the game in data/noarch/game/; the Steam zip holds it at its root.
+     * The zip is streamed from where it starts in the file, never copied.
      */
     private void unpackGame(Uri installer, IntConsumer progress) throws Exception {
         File game = gameDir(), tmp = new File(game.getParentFile(), "game.import");
         deleteTree(tmp);   // left by an import that didn't finish
-        if (game.getParentFile().getUsableSpace() < GAME_BYTES)
-            throw new IOException("not enough free space, the game needs 2.5 GB");
         String root = tmp.getCanonicalPath() + "/";
         try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(installer, "r");
              FileChannel ch = new FileInputStream(pfd.getFileDescriptor()).getChannel()) {
             long start = zipStart(ch), size = ch.size();
+            // the Steam zip is uncompressed, so with DLCs it can hold more than GAME_BYTES
+            long need = Math.max(GAME_BYTES, size - start);
+            if (game.getParentFile().getUsableSpace() < need)
+                throw new IOException(String.format(Locale.US, "not enough free space, the game needs %.1f GB", need / 1e9));
+            String prefix = start > 0 ? INSTALLER_GAME : "";   // something in front of the zip: GOG's installer
             ch.position(start);
             ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Channels.newInputStream(ch), 1 << 16));
             int shown = -1;
             for (ZipEntry e; (e = zip.getNextEntry()) != null; ) {
-                if (!e.getName().startsWith(INSTALLER_GAME) || e.getName().equals(INSTALLER_GAME))
+                if (!e.getName().startsWith(prefix) || e.getName().equals(prefix))
                     continue;
-                File out = new File(tmp, e.getName().substring(INSTALLER_GAME.length()));
+                File out = new File(tmp, e.getName().substring(prefix.length()));
                 if (!out.getCanonicalPath().startsWith(root))
                     throw new IOException("bad file name in the installer: " + e.getName());
                 if (e.isDirectory()) {
@@ -443,10 +449,15 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Where the zip starts in a file that has something in front of it. The zip's end record counts
-     * the central directory's offset from the zip's own start, and the directory ends at the record.
+     * Where the zip starts in the file: 0 for a plain zip, or after what is in front of it. The zip's
+     * end record counts the central directory's offset from the zip's own start, and the directory
+     * ends at the record. (A plain zip is checked first: past 4 GB it is zip64, whose end record holds
+     * 0xffffffff instead of the offset.)
      */
     private static long zipStart(FileChannel ch) throws IOException {
+        ByteBuffer first = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+        if (ch.read(first, 0) == 4 && first.getInt(0) == 0x04034b50)
+            return 0;
         long size = ch.size();
         int len = (int) Math.min(size, 22 + 65535);   // the end record plus its longest comment
         ByteBuffer b = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
@@ -460,7 +471,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                     return start;
                 break;
             }
-        throw new IOException("not GOG's installer (no zip inside)");
+        throw new IOException("not GOG's installer or the Steam zip (no zip inside)");
     }
 
     /** Runs assets/patch-shaders.sh on the game folder: the game's GLSL 1.20 shaders as GLSL ES. */
