@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.hardware.input.InputManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -14,6 +15,7 @@ import android.text.InputType;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
+import android.view.InputDevice;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -49,6 +51,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Locale;
 import java.util.function.IntConsumer;
@@ -94,6 +97,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static native void nativeButton(int button, boolean down);
     private static native void nativeKey(int scancode, boolean down);
     private static native void nativeText(int codePoint);
+    private static native void nativePad(boolean connected);
+    private static native void nativePadButton(int button, boolean down);
+    private static native void nativePadAxis(int axis, int value);
 
     private Process gameProcess;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -255,10 +261,14 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
         String socket = "ddport." + android.os.Process.myPid();
         int refreshes = Math.max(1, Math.round(getDisplay().getRefreshRate() / fps));
-        if (nativeStart(this, socket, gameW, gameH, refreshes) != 0)
+        if (nativeStart(this, socket, gameW, gameH, refreshes) != 0) {
             Log.e(TAG, "cannot start the frame receiver");
-        else
-            startGame(socket);
+            return;
+        }
+        inputManager = getSystemService(InputManager.class);
+        inputManager.registerInputDeviceListener(padListener, handler);
+        checkPads();
+        startGame(socket);
     }
 
     private void hideSystemBars() {
@@ -311,6 +321,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     @Override
     protected void onDestroy() {
+        if (inputManager != null)
+            inputManager.unregisterInputDeviceListener(padListener);
         if (gameProcess != null)
             gameProcess.destroy();
         super.onDestroy();
@@ -398,6 +410,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (gameW == 0)
             return super.onKeyDown(keyCode, event);
+        if (padKey(keyCode, event, true))
+            return true;
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.getRepeatCount() == 0)   // a held Back must not toggle the menu over and over
                 nativeKey(SCANCODE_ESCAPE, true);
@@ -418,6 +432,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     public boolean onKeyUp(int keyCode, KeyEvent event) {
         if (gameW == 0)
             return super.onKeyUp(keyCode, event);
+        if (padKey(keyCode, event, false))
+            return true;
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             nativeKey(SCANCODE_ESCAPE, false);
             return true;
@@ -614,6 +630,121 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             tapKey(KeyEvent.KEYCODE_ENTER);   // Done
             return true;
         }
+    }
+
+    // ---- game controller ----
+    // The game gets one controller, connected while any gamepad or joystick is: every such device
+    // drives it. Buttons and axes use SDL's numbering (SDL_GameControllerButton, SDL_GameControllerAxis).
+    private static final int PAD_DPAD_UP = 11, PAD_DPAD_DOWN = 12, PAD_DPAD_LEFT = 13, PAD_DPAD_RIGHT = 14;
+    private static final int PAD_TRIGGER_LEFT = 4, PAD_TRIGGER_RIGHT = 5;
+    private InputManager inputManager;
+    private boolean padConnected;
+    private final int[] padAxes = new int[6];   // the values last sent
+    private int hatX, hatY;                     // the d-pad as last sent (-1, 0, 1)
+
+    private final InputManager.InputDeviceListener padListener = new InputManager.InputDeviceListener() {
+        @Override public void onInputDeviceAdded(int id) { checkPads(); }
+        @Override public void onInputDeviceRemoved(int id) { checkPads(); }
+        @Override public void onInputDeviceChanged(int id) { checkPads(); }
+    };
+
+    private static boolean isPad(InputDevice d) {
+        if (d == null || d.isVirtual())
+            return false;
+        int sources = d.getSources();
+        return (sources & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD
+                || (sources & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK;
+    }
+
+    private void checkPads() {
+        boolean any = false;
+        for (int id : InputDevice.getDeviceIds())
+            any |= isPad(InputDevice.getDevice(id));
+        if (any == padConnected)
+            return;
+        padConnected = any;
+        Arrays.fill(padAxes, 0);   // the game zeroes its state too
+        hatX = hatY = 0;
+        Log.i(TAG, "game controller " + (any ? "connected" : "disconnected"));
+        nativePad(any);
+    }
+
+    /** The SDL_GameControllerButton of a controller key, or -1. */
+    private static int padButton(int keyCode) {
+        switch (keyCode) {
+        case KeyEvent.KEYCODE_BUTTON_A: return 0;
+        case KeyEvent.KEYCODE_BUTTON_B: return 1;
+        case KeyEvent.KEYCODE_BUTTON_X: return 2;
+        case KeyEvent.KEYCODE_BUTTON_Y: return 3;
+        case KeyEvent.KEYCODE_BUTTON_SELECT: return 4;   // Back (View on Xbox controllers)
+        case KeyEvent.KEYCODE_BUTTON_MODE: return 5;     // Guide
+        case KeyEvent.KEYCODE_BUTTON_START: return 6;
+        case KeyEvent.KEYCODE_BUTTON_THUMBL: return 7;
+        case KeyEvent.KEYCODE_BUTTON_THUMBR: return 8;
+        case KeyEvent.KEYCODE_BUTTON_L1: return 9;
+        case KeyEvent.KEYCODE_BUTTON_R1: return 10;
+        case KeyEvent.KEYCODE_DPAD_UP: return PAD_DPAD_UP;
+        case KeyEvent.KEYCODE_DPAD_DOWN: return PAD_DPAD_DOWN;
+        case KeyEvent.KEYCODE_DPAD_LEFT: return PAD_DPAD_LEFT;
+        case KeyEvent.KEYCODE_DPAD_RIGHT: return PAD_DPAD_RIGHT;
+        default: return -1;
+        }
+    }
+
+    /** Sends a controller's key as its button (or trigger); false if the key is not a controller's. */
+    private boolean padKey(int keyCode, KeyEvent event, boolean down) {
+        InputDevice d = event.getDevice();
+        if (!isPad(d))
+            return false;
+        int button = padButton(keyCode);
+        int trigger = keyCode == KeyEvent.KEYCODE_BUTTON_L2 ? PAD_TRIGGER_LEFT
+                : keyCode == KeyEvent.KEYCODE_BUTTON_R2 ? PAD_TRIGGER_RIGHT : -1;
+        if (button < 0 && trigger < 0)
+            return false;
+        if (event.getRepeatCount() > 0)
+            return true;
+        if (button >= 0)
+            nativePadButton(button, down);
+        else if (d.getMotionRange(MotionEvent.AXIS_LTRIGGER) == null && d.getMotionRange(MotionEvent.AXIS_BRAKE) == null)
+            padAxis(trigger, down ? 1 : 0);   // a digital trigger; analog ones come as axes
+        return true;
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent e) {
+        if (gameW == 0 || !e.isFromSource(InputDevice.SOURCE_JOYSTICK) || e.getActionMasked() != MotionEvent.ACTION_MOVE)
+            return super.onGenericMotionEvent(e);
+        padAxis(0, e.getAxisValue(MotionEvent.AXIS_X));
+        padAxis(1, e.getAxisValue(MotionEvent.AXIS_Y));
+        padAxis(2, e.getAxisValue(MotionEvent.AXIS_Z));
+        padAxis(3, e.getAxisValue(MotionEvent.AXIS_RZ));
+        // triggers come as LTRIGGER/RTRIGGER, BRAKE/GAS or both, depending on the controller
+        padAxis(PAD_TRIGGER_LEFT, Math.max(e.getAxisValue(MotionEvent.AXIS_LTRIGGER), e.getAxisValue(MotionEvent.AXIS_BRAKE)));
+        padAxis(PAD_TRIGGER_RIGHT, Math.max(e.getAxisValue(MotionEvent.AXIS_RTRIGGER), e.getAxisValue(MotionEvent.AXIS_GAS)));
+        // a d-pad that reports as a hat; handling it here also stops Android making DPAD keys of it
+        hatX = hat(hatX, Math.round(e.getAxisValue(MotionEvent.AXIS_HAT_X)), PAD_DPAD_LEFT, PAD_DPAD_RIGHT);
+        hatY = hat(hatY, Math.round(e.getAxisValue(MotionEvent.AXIS_HAT_Y)), PAD_DPAD_UP, PAD_DPAD_DOWN);
+        return true;
+    }
+
+    /** Sends an axis (-1..1, triggers 0..1) in SDL's range, if it changed. */
+    private void padAxis(int axis, float v) {
+        int value = Math.max(-32768, Math.min(32767, Math.round(v * 32767)));
+        if (value == padAxes[axis])
+            return;
+        padAxes[axis] = value;
+        nativePadAxis(axis, value);
+    }
+
+    /** Presses and releases d-pad buttons for a hat axis that moved from was to now (-1, 0, 1). */
+    private static int hat(int was, int now, int negative, int positive) {
+        if (now == was)
+            return now;
+        if (was != 0)
+            nativePadButton(was < 0 ? negative : positive, false);
+        if (now != 0)
+            nativePadButton(now < 0 ? negative : positive, true);
+        return now;
     }
 
     // ---- files ----

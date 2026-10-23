@@ -53,6 +53,8 @@ The touch screen works like a laptop trackpad:
 - **Tap, then touch again and hold** to drag.
 - **Back** opens the game's Escape menu.
 
+A **game controller** (Bluetooth or USB) works as on PC, with the game's own button prompts. It can be connected or disconnected at any time. Rumble isn't supported. Tested with an Xbox Wireless Controller.
+
 When the game asks for text (naming the hamlet, renaming a hero), the on-screen keyboard opens and the game slides up so the field stays above it. Enter confirms. If Back hid the keyboard, a tap brings it back.
 
 ## Known limitations
@@ -67,7 +69,7 @@ The app runs as two processes:
 app process (Java + libddview.so)                     game process (libddhost.so, started by the app)
   launch / import screens                               Box64 as a shared library, built against Android's libc
   shows the game's frames, draws the cursor   <-- frames + fences --   x86_64 darkest.bin, FMOD, libstdc++
-  touch -> trackpad, Back -> Escape           -- input -->             libddglue.so  (stands in for SDL2: GLES context, frames, input;
+  touch -> trackpad, Back -> Escape, pad      -- input -->             libddglue.so  (stands in for SDL2: GLES context, frames, input;
                                                                                         the rest goes to the real libSDL2.so)
                                                                          libGL.so      (gl4es: OpenGL 2.1 -> GLES 2)
                                                                          libddaudio.so (stands in for ALSA: FMOD's output -> AAudio)

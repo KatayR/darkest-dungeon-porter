@@ -20,6 +20,9 @@ enum {
     DD_RELEASE,       // a=buffer index: the app no longer shows it, the game may draw into it again
     DD_FOCUS,         // a=1 the game is on screen / 0 it isn't (the game ignores input without focus)
     DD_TEXT,          // a=one typed character (Unicode code point)
+    DD_PAD,           // a=1 a game controller is connected / 0 none is
+    DD_PAD_BUTTON,    // a=SDL_GameControllerButton b=1 down / 0 up
+    DD_PAD_AXIS,      // a=SDL_GameControllerAxis b=value (sticks -32768..32767, triggers 0..32767)
 
     // game -> app
     DD_BUFFERS_MSG,   // a=count b=width c=height; followed by `count` AHardwareBuffer handle packets

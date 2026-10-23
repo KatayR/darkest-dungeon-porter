@@ -11,6 +11,9 @@
 //   and a swap waits until the previous frame is on screen, so the game never draws frames nobody sees.
 // - Input: mouse/key/focus messages from the app become SDL events. A press and its release are never
 //   delivered in the same game frame (the game would miss the click or key; see sdl-tapfix/tapfix.c).
+// - Controller: SDL's joystick subsystem needs Java, so it stays off and this file is the game's one
+//   controller: the app's DD_PAD messages become SDL controller events, and the game's controller
+//   calls answer from the state those events left (no rumble).
 // - Text: SDL_StartTextInput/SDL_StopTextInput open and close the app's keyboard. A typed character
 //   becomes SDL_TEXTINPUT plus a press of TEXT_KEY: the game's text fields insert the last text
 //   received only when a printable key goes down, one character per frame.
@@ -147,8 +150,8 @@ static void connect_app(void) {
 }
 
 // ---- subsystems ----
-// On Android these talk to SDL's Java side, which this process doesn't have. The game copes with
-// having no controllers.
+// On Android these talk to SDL's Java side, which this process doesn't have. Controllers come from
+// the app instead (see "controller" below).
 #define NEEDS_JAVA (SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC | SDL_INIT_SENSOR)
 
 int SDL_Init(Uint32 flags) {
@@ -422,7 +425,15 @@ void SDL_GL_SwapWindow(SDL_Window *window) {
 static Uint32 buttons;   // SDL_BUTTON_LMASK etc.
 static int mouse_x, mouse_y;
 
+static SDL_Event second;   // the other half of a message that becomes two events
+static int has_second;
+
 static int next_event(SDL_Event *e) {
+    if (has_second) {
+        *e = second;
+        has_second = 0;
+        return 1;
+    }
     if (real.PollEvent(e))
         return 1;
     pthread_mutex_lock(&lock);
@@ -494,6 +505,28 @@ static int next_event(SDL_Event *e) {
         e->text.windowID = id;
         break;
     }
+    case DD_PAD:   // as in SDL: a joystick event, then a controller one, both for device 0
+        LOG("controller %s", m.a ? "connected" : "disconnected");
+        e->type = m.a ? SDL_JOYDEVICEADDED : SDL_JOYDEVICEREMOVED;
+        second.cdevice.type = m.a ? SDL_CONTROLLERDEVICEADDED : SDL_CONTROLLERDEVICEREMOVED;
+        second.cdevice.timestamp = SDL_GetTicks();
+        second.cdevice.which = 0;
+        has_second = 1;
+        break;
+    case DD_PAD_BUTTON:
+        if (m.a < 0 || m.a >= SDL_CONTROLLER_BUTTON_MAX)
+            return next_event(e);
+        e->type = m.b ? SDL_CONTROLLERBUTTONDOWN : SDL_CONTROLLERBUTTONUP;
+        e->cbutton.button = m.a;
+        e->cbutton.state = m.b ? SDL_PRESSED : SDL_RELEASED;
+        break;
+    case DD_PAD_AXIS:
+        if (m.a < 0 || m.a >= SDL_CONTROLLER_AXIS_MAX)
+            return next_event(e);
+        e->type = SDL_CONTROLLERAXISMOTION;
+        e->caxis.axis = m.a;
+        e->caxis.value = m.b;
+        break;
     default:
         return next_event(e);
     }
@@ -501,13 +534,100 @@ static int next_event(SDL_Event *e) {
     return 1;
 }
 
+// ---- controller ----
+// One controller, device 0, whose handles are these addresses. Its state changes as its events reach
+// the game, so polling it agrees with the events. Every call that takes a handle is answered here:
+// the real SDL never sees one. SDL_GameControllerEventState and SDL_GameControllerUpdate stay SDL's
+// (they only set event states, and update nothing without the joystick subsystem).
+static char pad_handle, pad_joystick;
+static int pad_attached;
+static Uint8 pad_buttons[SDL_CONTROLLER_BUTTON_MAX];
+static Sint16 pad_axes[SDL_CONTROLLER_AXIS_MAX];
+#define PAD ((SDL_GameController *)&pad_handle)
+
+// applies a controller event to the state; 1 if the game ignores events of its type
+static int pad_event(const SDL_Event *e) {
+    switch (e->type) {
+    case SDL_JOYDEVICEADDED:
+    case SDL_CONTROLLERDEVICEADDED:
+        pad_attached = 1;
+        break;
+    case SDL_JOYDEVICEREMOVED:
+    case SDL_CONTROLLERDEVICEREMOVED:
+        pad_attached = 0;
+        memset(pad_buttons, 0, sizeof pad_buttons);
+        memset(pad_axes, 0, sizeof pad_axes);
+        break;
+    case SDL_CONTROLLERBUTTONDOWN:
+    case SDL_CONTROLLERBUTTONUP:
+        pad_buttons[e->cbutton.button] = e->cbutton.state;
+        break;
+    case SDL_CONTROLLERAXISMOTION:
+        pad_axes[e->caxis.axis] = e->caxis.value;
+        break;
+    default:
+        return 0;
+    }
+    return SDL_EventState(e->type, SDL_QUERY) == SDL_IGNORE;
+}
+
+int SDL_NumJoysticks(void) {
+    return pad_attached;
+}
+
+SDL_bool SDL_IsGameController(int index) {
+    return index == 0 && pad_attached;
+}
+
+SDL_GameController *SDL_GameControllerOpen(int index) {
+    if (!SDL_IsGameController(index)) {
+        SDL_SetError("There are %d joysticks available", pad_attached);
+        return NULL;
+    }
+    LOG("game opens the controller");
+    return PAD;
+}
+
+void SDL_GameControllerClose(SDL_GameController *c) {
+    (void)c;
+}
+
+SDL_bool SDL_GameControllerGetAttached(SDL_GameController *c) {
+    return c == PAD && pad_attached;
+}
+
+Uint8 SDL_GameControllerGetButton(SDL_GameController *c, SDL_GameControllerButton b) {
+    return c == PAD && b >= 0 && b < SDL_CONTROLLER_BUTTON_MAX ? pad_buttons[b] : 0;
+}
+
+Sint16 SDL_GameControllerGetAxis(SDL_GameController *c, SDL_GameControllerAxis a) {
+    return c == PAD && a >= 0 && a < SDL_CONTROLLER_AXIS_MAX ? pad_axes[a] : 0;
+}
+
+SDL_Joystick *SDL_GameControllerGetJoystick(SDL_GameController *c) {
+    return c == PAD ? (SDL_Joystick *)&pad_joystick : NULL;
+}
+
+int SDL_JoystickIsHaptic(SDL_Joystick *j) {
+    (void)j;
+    return 0;
+}
+
+SDL_Haptic *SDL_HapticOpenFromJoystick(SDL_Joystick *j) {
+    (void)j;
+    SDL_SetError("Haptic: Joystick isn't a haptic device.");
+    return NULL;
+}
+
+// ---- polling ----
 // tapfix (see port/phone/sdl-tapfix/tapfix.c): the game folds events into per-frame state, so a
 // press and release drained in the same frame cancel out. A release that arrives in the frame of
 // its press is parked (with everything after it) until MIN_FRAMES frames and MIN_HOLD_MS passed.
-// Keys too: Android sends a tapped Back's down and up together.
+// Keys and controller buttons too: Android sends a tapped Back's down and up together.
 #define QUEUE_MAX   256
 #define MAX_BUTTONS 8
-#define MAX_PRESS   (MAX_BUTTONS + SDL_NUM_SCANCODES)   // mouse buttons, then keys by scancode
+// mouse buttons, then keys by scancode, then controller buttons
+#define MAX_PRESS   (MAX_BUTTONS + SDL_NUM_SCANCODES + SDL_CONTROLLER_BUTTON_MAX)
 #define MIN_FRAMES  2
 #define MIN_HOLD_MS 60
 static SDL_Event queue[QUEUE_MAX];
@@ -524,6 +644,8 @@ static int press_of(const SDL_Event *e) {
         return e->button.button < MAX_BUTTONS ? e->button.button : -1;
     if (e->type == SDL_KEYDOWN || e->type == SDL_KEYUP)
         return e->key.keysym.scancode < SDL_NUM_SCANCODES ? MAX_BUTTONS + (int)e->key.keysym.scancode : -1;
+    if (e->type == SDL_CONTROLLERBUTTONDOWN || e->type == SDL_CONTROLLERBUTTONUP)
+        return MAX_BUTTONS + SDL_NUM_SCANCODES + e->cbutton.button;   // checked in next_event
     return -1;
 }
 
@@ -532,17 +654,8 @@ static int end_frame(void) {
     return 0;
 }
 
-int SDL_PollEvent(SDL_Event *ev) {
-    connect_app();
-    if (!ev) {
-        if (held < 0 && q_len > 0)
-            return 1;
-        SDL_Event e;
-        if (!next_event(&e))
-            return 0;
-        queue[(q_head + q_len++) % QUEUE_MAX] = e;   // keep it for the next real poll
-        return 1;
-    }
+// the next event for the game, after tapfix
+static int next_for_game(SDL_Event *ev) {
     if (held >= 0) {
         SDL_Event e;
         while (q_len < QUEUE_MAX && next_event(&e))
@@ -561,7 +674,7 @@ int SDL_PollEvent(SDL_Event *ev) {
 
     int b = press_of(&e);
     if (b >= 0) {
-        if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_KEYDOWN) {
+        if (e.type == SDL_MOUSEBUTTONDOWN || e.type == SDL_KEYDOWN || e.type == SDL_CONTROLLERBUTTONDOWN) {
             down[b] = 1;
             press_frame[b] = frame;
             press_ms[b] = SDL_GetTicks();
@@ -577,6 +690,23 @@ int SDL_PollEvent(SDL_Event *ev) {
     }
     *ev = e;
     return 1;
+}
+
+int SDL_PollEvent(SDL_Event *ev) {
+    connect_app();
+    if (!ev) {
+        if (held < 0 && q_len > 0)
+            return 1;
+        SDL_Event e;
+        if (!next_event(&e))
+            return 0;
+        queue[(q_head + q_len++) % QUEUE_MAX] = e;   // keep it for the next real poll
+        return 1;
+    }
+    while (next_for_game(ev))
+        if (!pad_event(ev))
+            return 1;
+    return 0;
 }
 
 // as in SDL: the keyboard shows only if the hint allows it. SDL's own video init starts text input

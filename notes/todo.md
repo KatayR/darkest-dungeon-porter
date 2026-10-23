@@ -989,3 +989,31 @@ Reported: "there is lag on audio". Measured on the Galaxy A34 (0.4.0 debug, game
 - [ ] **Manual:** by ear in town and in a dungeon (sound follows clicks and attacks closely, no crackle), and that `logcat -s ddaudio` shows few or no `underruns, FMOD now queues` lines after a long session. The queue only grows, so frequent stalls would bring latency back up; if they do, rethink the growth.
 - [ ] **Manual:** headphones in and out (now goes through `check_stream`, also from `avail_update`).
 - [ ] Not tested: the OnePlus 5 (slower CPU, the most likely to grow the queue).
+
+## Controller support (2026-10-23)
+Reported: an Xbox Wireless Controller connected to the A34 isn't detected. The game supports controllers (it imports `SDL_NumJoysticks`, `SDL_IsGameController`, `SDL_GameControllerOpen/Close/GetAttached/GetButton/GetAxis/GetJoystick/EventState/Update`, `SDL_JoystickIsHaptic`, `SDL_NumHaptics`, `SDL_HapticOpenFromJoystick/Close`, and has controller UI states and button prompts). Two things hide it:
+- The glue masks `SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER`: SDL's Android joystick driver needs Java, which the game process doesn't have.
+- `DDActivity` forwards only touch, Back and keyboard keys.
+
+The phone reports this controller (`dumpsys input`) with sources `KEYBOARD | GAMEPAD | JOYSTICK`, `Generic.kl`, sticks on X/Y and Z/RZ, the d-pad on HAT_X/HAT_Y, and the triggers on both LTRIGGER/RTRIGGER and BRAKE/GAS.
+
+**Plan:** the route mouse and keys already use. The app reads the controller and sends its state over the socket; the glue answers the game's controller calls itself. SDL's joystick code stays off.
+- [x] `ddproto.h`: `DD_PAD` (a=1 connected / 0 not), `DD_PAD_BUTTON` (a=SDL_GameControllerButton, b=down), `DD_PAD_AXIS` (a=SDL_GameControllerAxis, b=SDL value).
+- [x] `DDActivity`: one virtual controller, connected while any device has a gamepad or joystick source (scan at start, `InputDeviceListener` for hotplug). Gamepad keys become buttons (L2/R2 keys become full triggers). `onGenericMotionEvent` sends the sticks, the triggers (the larger of LTRIGGER/BRAKE and RTRIGGER/GAS) and the hat as d-pad buttons, each only when it changed.
+- [x] `ddview`: JNI for the three messages; remembers whether a pad is connected and tells the game when it connects.
+- [x] `ddglue`: the messages become SDL device/button/axis events; the state (attached, buttons, axes) changes when an event reaches the game, so polling agrees with events; `SDL_GameControllerEventState(SDL_IGNORE)` is honoured. Tapfix covers controller buttons. Overrides for every controller and haptic function the game imports (no rumble).
+- [x] Check which keycode the View button sends on this controller: `getevent -lp` lists `BTN_SELECT` (and A, B, X, Y as 304, 305, 307, 308, which `Generic.kl` maps to BUTTON_A/B/X/Y), so no `KEYCODE_BACK` special case is needed. Share is `KEY_RECORD` and stays unmapped.
+- [x] README: the controller line.
+- [x] **Verify on the A34:** the game opens the controller (logcat `ddglue`); the title menu, town and a battle with the controller; button prompts; controller off and on mid-game, and on at launch; touch and the phone's Back still work.
+
+**Changes against the plan:**
+- `SDL_GameControllerEventState` and `SDL_GameControllerUpdate` stay SDL's own. The first only sets the event states of the controller event types, and the second returns at once without the joystick subsystem. Before a controller event is handed over, the glue asks `SDL_EventState(type, SDL_QUERY)`, so ignoring events through either API works. `SDL_NumHaptics` and `SDL_HapticClose` stay SDL's too: without haptic init they report none and reject a NULL handle.
+- `BUTTON_L2`/`R2` keys only count as triggers on a controller without analog trigger axes. Otherwise a controller that sends both would make the trigger jump.
+- Box64 passes every one of these calls straight through (`GO` in `wrappedsdl2_private.h`), so the glue's definitions are the ones the game reaches.
+
+**Review (Galaxy A34, debug build, Xbox Wireless Controller over Bluetooth):**
+- The game opens the controller at start (`ddglue: game opens the controller`). A skips the intro, and the d-pad, left stick and A work on the title menu. The hamlet switches to controller mode: buildings are highlighted, and the game's Xbox prompts (RT, RB, Y) show. B and Menu respond.
+- Controller off mid-game: `disconnected` on both sides, and touch and the phone's Back (Escape menu) still work. Back on: `connected`, and the game opens it again without a restart.
+- 60 FPS, no errors in logcat.
+- Couldn't be automated: `sendevent` into the controller's node is denied for the shell user, so the presses were done by hand.
+- [ ] Not tested: other controllers (PlayStation, generic), a USB controller, the OnePlus 5, and a battle with the controller.

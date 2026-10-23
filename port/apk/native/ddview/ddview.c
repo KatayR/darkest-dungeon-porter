@@ -3,6 +3,8 @@
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
 // Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
 // positions to the game. Tells the activity when the game wants text (it shows the keyboard).
+// Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
+// here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
 // nothing is swapped twice in one refresh, counted by a vsync thread (ddglue keeps the game from
 // drawing ahead, see DD_SURFACE).
@@ -39,6 +41,7 @@ static int since_swap;             // refreshes since anything was last swapped 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static ANativeWindow *pending_window;   // set by the UI thread, picked up by the render thread
 static int window_changed;
+static int pad;                    // a game controller is connected (DD_PAD)
 
 // cursor: position in game pixels, owned here (see file comment)
 static float cursor_x, cursor_y;
@@ -382,11 +385,14 @@ static void *render_thread(void *arg) {
             if (c >= 0) {
                 pthread_mutex_lock(&lock);
                 conn = c;
+                int has_pad = pad;
                 pthread_mutex_unlock(&lock);
                 LOG("game connected");
                 send_fenced(DD_SURFACE, game_w, game_h, refreshes, -1);
                 send_msg(DD_MOUSE_MOVE, (int)cursor_x, (int)cursor_y);   // where the drawn cursor starts
                 send_msg(DD_FOCUS, window != NULL, 0);
+                if (has_pad)
+                    send_msg(DD_PAD, 1, 0);
             }
         }
         if (since_swap < 1)
@@ -484,4 +490,25 @@ JNIEXPORT void JNICALL
 Java_org_ddport_darkest_DDActivity_nativeText(JNIEnv *env, jclass cls, jint code_point) {
     (void)env; (void)cls;
     send_msg(DD_TEXT, code_point, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativePad(JNIEnv *env, jclass cls, jboolean connected) {
+    (void)env; (void)cls;
+    pthread_mutex_lock(&lock);
+    pad = connected;
+    pthread_mutex_unlock(&lock);
+    send_msg(DD_PAD, connected, 0);
+}
+
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativePadButton(JNIEnv *env, jclass cls, jint button, jboolean down) {
+    (void)env; (void)cls;
+    send_msg(DD_PAD_BUTTON, button, down);
+}
+
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativePadAxis(JNIEnv *env, jclass cls, jint axis, jint value) {
+    (void)env; (void)cls;
+    send_msg(DD_PAD_AXIS, axis, value);
 }

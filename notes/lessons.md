@@ -75,3 +75,8 @@ Project rules learned from mistakes made during the port.
 
 ## Audio latency
 - Check where a stream lands before tuning its buffer: `dumpsys media.audio_flinger` names the output thread and gives each track's latency. FMOD's stream was on the deep-buffer output (233 ms) and setting `LOW_LATENCY` changed nothing, because AAudio's legacy path never gives a write-driven stream a fast track (`AUDIO_OUTPUT_FLAG_FAST denied by client ... TRANSFER_SYNC`). Only a data-callback stream gets one.
+
+## Controller support
+- Controller presses can't be faked on the unrooted A34. `sendevent` into the controller's `/dev/input` node is denied for the shell user (SELinux), even though shell is in the `input` group. `input keyevent` comes from a virtual device, which the app doesn't count as a controller. Ask for real presses and check the result with screenshots and logcat.
+- Before overriding an SDL call in the glue, check Box64's `wrappedsdl2_private.h`. A plain `GO` entry means the game reaches the glue's definition. A `GOM` entry means Box64's own wrapper runs first.
+- Check whether the real SDL function already works before overriding it. `SDL_GameControllerEventState` only sets event states, so it needed no override.
