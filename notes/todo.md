@@ -916,3 +916,45 @@ Steam's Linux depots ship the same DRM-free `_linuxnosteam` build as GOG (Build 
   - Signed with the same upload key as 0.3.1 (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), so 0.3.1 installs update in place.
   - Published on GitHub with `get-steam-game.bat`.
   - Not installed on a phone: both test phones run debug builds, and switching signatures means an uninstall, which deletes the saves.
+
+## Keyboard for text fields (2026-10-23)
+Goal: Android's on-screen keyboard opens while the game wants text (naming the hamlet, renaming a hero, the hamlet's rename/add dialogs), typed text reaches the game, and the keyboard closes when the game stops asking. Hardware keyboards type too, and outside text fields their keys reach the game as normal keys.
+
+**How the game reads text** (static disassembly of `darkest.bin.x86_64` with `llvm-objdump -d -C`):
+- `Input_StartTextEdit` / `Input_BeginRawTextInput` call `SDL_StartTextInput` when the first field opens. `Input_FinishTextEdit` / `Input_EndRawTextInput` call `SDL_StopTextInput` when the last one closes.
+- `SDL_SetTextInputRect` always gets {0,0,500,500}, so it says nothing about where the field is.
+- `SDL_TEXTINPUT` only appends its bytes to a 256-byte ring, which is never drained.
+- The editors (`GUI_Text_Editable`, `TextBoxWidget::UpdateInput`) act once per frame on the newest KEYDOWN's **sym**:
+  - Backspace (8), Delete (0x7F), Left/Right, Return or keypad Enter (submit), Escape (cancel, `GUI_Text_Editable` only);
+  - any other sym from 1 to 0xFF inserts the **last UTF-8 character in the ring**.
+  - So text alone types nothing, a key alone repeats the previous character, and several characters in one frame give one.
+- A KEYDOWN counts only after that key's KEYUP; scancodes above 0xFF are ignored. Home, End and Ctrl+V do nothing.
+- A non-empty `SDL_TEXTEDITING` (composition) blocks typing, so the port never sends one.
+- `TextBoxWidget` ends editing on any mouse press.
+- Hotkeys seem suppressed only for `GUI_Text_Editable` fields, so text must not travel as letter scancodes.
+
+**Plan:**
+- [x] `ddproto.h`: `DD_TEXT` (app → game, a = one Unicode code point) and `DD_TEXT_INPUT` (game → app, a = 1 wants text / 0 doesn't).
+- [x] ddglue:
+  - `SDL_StartTextInput` / `SDL_StopTextInput` send `DD_TEXT_INPUT`.
+  - A `DD_TEXT` becomes `SDL_TEXTINPUT` (UTF-8), followed by a KEYDOWN and KEYUP of a "text key": scancode `SDL_SCANCODE_INTERNATIONAL1` (no keyboard sends it, no hotkey uses it), sym `'a'` (printable, so the editor inserts the character).
+  - tapfix already holds each KEYUP for 2 frames and 60 ms, with everything after it, so the characters reach the game one per frame or slower, in order.
+- [x] ddview: `nativeStart` keeps the activity (global ref) and the JavaVM; `DD_TEXT_INPUT` calls `DDActivity.onTextInput(boolean)` from the render thread (attached to the VM once). `nativeText(codePoint)` sends `DD_TEXT`.
+- [x] DDActivity:
+  - A `SurfaceView` subclass that is a focused text editor: `TYPE_TEXT_VARIATION_VISIBLE_PASSWORD` (no autocorrect or suggestions) and no fullscreen keyboard in landscape.
+  - Its input connection never fills its own text, so the keyboard sees an empty field (Backspace arrives as a key). Commit and composition both send the difference to the last composing text: Backspaces, then the new characters. Deleting around the cursor sends Backspace/Delete; the Done action sends Return.
+  - `onTextInput` shows or hides the keyboard. A tap while the game wants text shows it again (after Back hid it).
+  - The keyboard never resizes or pans the game view (`SOFT_INPUT_ADJUST_NOTHING`).
+  - `onKeyDown`/`onKeyUp`: Back as before. While the game wants text, printable keys become `DD_TEXT`. Other keys go through an Android keycode → SDL scancode table (letters, digits, F-keys, editing keys, arrows, punctuation, modifiers), with repeats, because the game repeats held Backspace/Delete/arrows.
+- [x] README Controls.
+- **Not doing:** moving the game above the keyboard (the game gives no field position; if a field ends up hidden, stop and decide); the clipboard (only the Dueling Grounds copy/paste buttons use it). The name field did end up hidden, so the game now pans (see the review).
+- [x] **Verify on the Galaxy A34** (debug build; 0.4.0 uninstalled, the Steam zip re-imported, a new campaign): the hamlet name in all three slots, by adb and by hand.
+- [ ] Not verified: hero rename and the hamlet dialogs (not reached), Bluetooth/USB keyboards.
+
+**Review:**
+- **Works on the A34** (SwiftKey): the keyboard opens when the game opens the name field and closes on Enter; letters (also non-ASCII, e.g. "ı"), Backspace and Done reach the game one each; Back outside fields still opens the Escape menu; the trackpad still works; 60 FPS on the title screen.
+- **Fixed on the way:**
+  - SDL's own video init calls `SDL_StartTextInput` (with the screen-keyboard hint off, meaning "no keyboard"), which popped the keyboard up at launch. The glue now follows that hint, like the real SDL.
+  - `showSoftInput` was ignored when the view had lost focus; the view now takes focus right before.
+  - Android outlined the focused game view in green after a key press; the focus highlight is off for it.
+- **Panning:** the keyboard covers the lower half of the screen, and the save-name field sits in the slot row clicked before the mode dialog, not where the last click was. ddview keeps the left clicks of the last 30 s. When the keyboard opens, the game slides up until the lowest of them is just above the keyboard, but never so far that the last click leaves the screen. The bars the keyboard brings overlay the game instead of moving it (`setDecorFitsSystemWindows(false)`). Confirmed by hand in slots 1–3.

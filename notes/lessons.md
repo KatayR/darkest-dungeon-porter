@@ -3,6 +3,7 @@
 Project rules learned from mistakes made during the port.
 
 ## Verifying input
+- When a phone test needs a long trackpad walk through menus (blind swipes, screenshots, re-aiming), ask the owner to do those steps by hand rather than driving them over adb. Typing and clicking through the game by adb took many slow rounds that a person does in seconds; keep adb for logs, screenshots and short exact checks.
 - A screenshot of the game running does not prove input works. Before calling controls done, test an *instant* click (e.g. `xdotool click 1`) and confirm the game reacts, since real taps on a touch layer are often zero-length.
 
 ## Measuring FPS

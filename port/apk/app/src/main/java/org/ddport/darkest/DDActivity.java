@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.system.Os;
+import android.text.InputType;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
@@ -21,6 +22,10 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.view.inputmethod.BaseInputConnection;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -63,7 +68,8 @@ import java.util.zip.ZipInputStream;
  * extras "height" and "fps" skip it.
  *
  * Touch works like a laptop trackpad: one finger moves the cursor, a tap clicks, a two-finger tap
- * right-clicks, tap then hold drags. Back sends Escape.
+ * right-clicks, tap then hold drags. Back sends Escape. While the game wants text, the keyboard is up
+ * and types into it; hardware keyboards always reach the game.
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "DDActivity";
@@ -81,15 +87,20 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         System.loadLibrary("ddview");
     }
 
-    private static native int nativeStart(String socketName, int width, int height, int frameRefreshes);
+    private static native int nativeStart(DDActivity activity, String socketName, int width, int height,
+                                          int frameRefreshes);
     private static native void nativeSetSurface(Object surface);
     private static native void nativeMoveCursor(float dx, float dy);
     private static native void nativeButton(int button, boolean down);
     private static native void nativeKey(int scancode, boolean down);
+    private static native void nativeText(int codePoint);
 
     private Process gameProcess;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private int gameW, gameH;   // 0 until the game starts
+    private GameView view;
+    private boolean textInput;  // the game wants text: the keyboard is up
+    private float lastClickY, lowestClickY;   // when the game asked for text, 0 (top) to 1 (see panAboveKeyboard)
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -227,15 +238,24 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private void start(int height, int fps) {
         gameH = height;
         gameW = height * 16 / 9;
-        SurfaceView view = new SurfaceView(this);
+        view = new GameView(this);
         view.getHolder().setFixedSize(gameW, gameH);
         view.getHolder().addCallback(this);
         view.setOnTouchListener((v, e) -> onTouch(e));
         setContentView(view);
+        // the keyboard (and the bars that may show with it) cover the game rather than resizing it;
+        // panAboveKeyboard moves it instead
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+                | WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN);
+        getWindow().setDecorFitsSystemWindows(false);
+        view.setOnApplyWindowInsetsListener((v, insets) -> {
+            panAboveKeyboard(insets.getInsets(WindowInsets.Type.ime()).bottom);
+            return insets;
+        });
 
         String socket = "ddport." + android.os.Process.myPid();
         int refreshes = Math.max(1, Math.round(getDisplay().getRefreshRate() / fps));
-        if (nativeStart(socket, gameW, gameH, refreshes) != 0)
+        if (nativeStart(this, socket, gameW, gameH, refreshes) != 0)
             Log.e(TAG, "cannot start the frame receiver");
         else
             startGame(socket);
@@ -358,6 +378,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 nativeButton(button, true);
                 nativeButton(button, false);           // the game side keeps it pressed long enough
                 lastTapUp = button == 1 ? e.getEventTime() : 0;
+                if (textInput)
+                    showKeyboard(true);                // back after Back hid it
             }
             break;
         case MotionEvent.ACTION_POINTER_UP:
@@ -370,23 +392,228 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return true;
     }
 
+    // Keys from hardware keyboards and from the on-screen keyboard. Held keys repeat: the game
+    // repeats Backspace, Delete and the arrows itself and ignores other repeats.
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && gameW > 0) {
+        if (gameW == 0)
+            return super.onKeyDown(keyCode, event);
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.getRepeatCount() == 0)   // a held Back must not toggle the menu over and over
                 nativeKey(SCANCODE_ESCAPE, true);
             return true;
         }
-        return super.onKeyDown(keyCode, event);
+        if (typesText(event)) {
+            nativeText(event.getUnicodeChar());
+            return true;
+        }
+        int scancode = scancode(keyCode);
+        if (scancode == 0)
+            return super.onKeyDown(keyCode, event);
+        nativeKey(scancode, true);
+        return true;
     }
 
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && gameW > 0) {
+        if (gameW == 0)
+            return super.onKeyUp(keyCode, event);
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
             nativeKey(SCANCODE_ESCAPE, false);
             return true;
         }
-        return super.onKeyUp(keyCode, event);
+        if (typesText(event))
+            return true;                       // typed when it went down
+        int scancode = scancode(keyCode);
+        if (scancode == 0)
+            return super.onKeyUp(keyCode, event);
+        nativeKey(scancode, false);
+        return true;
+    }
+
+    /** While the game wants text, a key that types a character sends that character, not the key. */
+    private boolean typesText(KeyEvent event) {
+        int c = event.getUnicodeChar();   // negative for a dead key (an accent waiting for its letter)
+        return textInput && c >= 0x20 && c != 0x7f;
+    }
+
+    /** The SDL scancode (SDL_scancode.h: the USB keyboard usage IDs) of an Android key, or 0. */
+    private static int scancode(int keyCode) {
+        if (keyCode >= KeyEvent.KEYCODE_A && keyCode <= KeyEvent.KEYCODE_Z)
+            return 4 + keyCode - KeyEvent.KEYCODE_A;
+        if (keyCode >= KeyEvent.KEYCODE_1 && keyCode <= KeyEvent.KEYCODE_9)
+            return 30 + keyCode - KeyEvent.KEYCODE_1;
+        if (keyCode >= KeyEvent.KEYCODE_F1 && keyCode <= KeyEvent.KEYCODE_F12)
+            return 58 + keyCode - KeyEvent.KEYCODE_F1;
+        switch (keyCode) {
+        case KeyEvent.KEYCODE_0: return 39;
+        case KeyEvent.KEYCODE_ENTER: return 40;
+        case KeyEvent.KEYCODE_ESCAPE: return SCANCODE_ESCAPE;
+        case KeyEvent.KEYCODE_DEL: return 42;            // Backspace
+        case KeyEvent.KEYCODE_TAB: return 43;
+        case KeyEvent.KEYCODE_SPACE: return 44;
+        case KeyEvent.KEYCODE_MINUS: return 45;
+        case KeyEvent.KEYCODE_EQUALS: return 46;
+        case KeyEvent.KEYCODE_LEFT_BRACKET: return 47;
+        case KeyEvent.KEYCODE_RIGHT_BRACKET: return 48;
+        case KeyEvent.KEYCODE_BACKSLASH: return 49;
+        case KeyEvent.KEYCODE_SEMICOLON: return 51;
+        case KeyEvent.KEYCODE_APOSTROPHE: return 52;
+        case KeyEvent.KEYCODE_GRAVE: return 53;
+        case KeyEvent.KEYCODE_COMMA: return 54;
+        case KeyEvent.KEYCODE_PERIOD: return 55;
+        case KeyEvent.KEYCODE_SLASH: return 56;
+        case KeyEvent.KEYCODE_INSERT: return 73;
+        case KeyEvent.KEYCODE_MOVE_HOME: return 74;
+        case KeyEvent.KEYCODE_PAGE_UP: return 75;
+        case KeyEvent.KEYCODE_FORWARD_DEL: return 76;    // Delete
+        case KeyEvent.KEYCODE_MOVE_END: return 77;
+        case KeyEvent.KEYCODE_PAGE_DOWN: return 78;
+        case KeyEvent.KEYCODE_DPAD_RIGHT: return 79;
+        case KeyEvent.KEYCODE_DPAD_LEFT: return 80;
+        case KeyEvent.KEYCODE_DPAD_DOWN: return 81;
+        case KeyEvent.KEYCODE_DPAD_UP: return 82;
+        case KeyEvent.KEYCODE_NUMPAD_ENTER: return 88;
+        case KeyEvent.KEYCODE_CTRL_LEFT: return 224;
+        case KeyEvent.KEYCODE_SHIFT_LEFT: return 225;
+        case KeyEvent.KEYCODE_ALT_LEFT: return 226;
+        case KeyEvent.KEYCODE_CTRL_RIGHT: return 228;
+        case KeyEvent.KEYCODE_SHIFT_RIGHT: return 229;
+        case KeyEvent.KEYCODE_ALT_RIGHT: return 230;
+        default: return 0;
+        }
+    }
+
+    private static final float FIELD_MARGIN = 0.07f;   // of the screen height: kept clear around a click
+
+    private static void tapKey(int keyCode) {
+        nativeKey(scancode(keyCode), true);
+        nativeKey(scancode(keyCode), false);   // the game side keeps it pressed long enough
+    }
+
+    /** Called by ddview (on its render thread) when the game starts or stops wanting text. */
+    private void onTextInput(boolean on, float lastClick, float lowestClick) {
+        handler.post(() -> {
+            textInput = on;
+            lastClickY = lastClick;
+            lowestClickY = lowestClick;
+            if (on)   // a new field: a fresh connection, nothing left over from the last one
+                getSystemService(InputMethodManager.class).restartInput(view);
+            showKeyboard(on);
+        });
+    }
+
+    private void showKeyboard(boolean show) {
+        InputMethodManager imm = getSystemService(InputMethodManager.class);
+        if (!show)
+            imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
+        else if (view.requestFocus())   // the keyboard only serves the focused view
+            imm.showSoftInput(view, 0);
+    }
+
+    /**
+     * Slides the game up so the field being typed into stays above the keyboard (`keyboard` = its
+     * height, 0 when hidden). The game doesn't say where its fields are, but the player clicked the
+     * field just before: as the last click (a hero's name), or a little earlier and lower down (a save
+     * slot, then the dialog that follows). So the lowest recent click goes just above the keyboard, as
+     * long as the last click stays on screen.
+     */
+    private void panAboveKeyboard(int keyboard) {
+        int h = view.getHeight();
+        float lowestAbove = (lowestClickY + FIELD_MARGIN) * h - (h - keyboard);   // pan that shows the lowest
+        float lastAtTop = (lastClickY - FIELD_MARGIN) * h;                       // most pan that shows the last
+        float pan = Math.max(0, Math.min(lowestAbove, lastAtTop));
+        view.setTranslationY(textInput && keyboard > 0 ? -pan : 0);
+    }
+
+    /** The game's view, and the text field the on-screen keyboard types into. */
+    private static class GameView extends SurfaceView {
+        GameView(Context c) {
+            super(c);
+            setFocusable(true);
+            setFocusableInTouchMode(true);
+            setDefaultFocusHighlightEnabled(false);   // a key press would outline the whole game
+        }
+
+        @Override
+        public boolean onCheckIsTextEditor() {
+            return true;
+        }
+
+        @Override
+        public InputConnection onCreateInputConnection(EditorInfo info) {
+            // no autocorrect or suggestions, and no full-screen text box in landscape
+            info.inputType = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+            info.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI | EditorInfo.IME_FLAG_NO_FULLSCREEN
+                    | EditorInfo.IME_ACTION_DONE;
+            return new GameInputConnection(this);
+        }
+    }
+
+    /**
+     * Sends what the on-screen keyboard types to the game. It keeps no text itself, so the keyboard
+     * sees an empty field and sends Backspace as a key. A word being composed (keyboards with
+     * suggestions) goes to the game as it changes: Backspaces for what changed, then the new characters.
+     */
+    private static class GameInputConnection extends BaseInputConnection {
+        private String composing = "";
+
+        GameInputConnection(View view) {
+            super(view, false);
+        }
+
+        /** Turns the game's copy of the composed text into `text`. */
+        private void typeOver(CharSequence text) {
+            String t = text.toString();
+            int same = 0;
+            while (same < composing.length() && same < t.length() && composing.charAt(same) == t.charAt(same))
+                same++;
+            if (same > 0 && Character.isHighSurrogate(composing.charAt(same - 1)))
+                same--;   // keep both halves of a character together
+            for (int n = composing.codePointCount(same, composing.length()); n > 0; n--)
+                tapKey(KeyEvent.KEYCODE_DEL);
+            t.substring(same).codePoints().forEach(c -> {
+                if (c == '\n')
+                    tapKey(KeyEvent.KEYCODE_ENTER);
+                else
+                    nativeText(c);
+            });
+        }
+
+        @Override
+        public boolean commitText(CharSequence text, int newCursorPosition) {
+            typeOver(text);
+            composing = "";
+            return true;
+        }
+
+        @Override
+        public boolean setComposingText(CharSequence text, int newCursorPosition) {
+            typeOver(text);
+            composing = text.toString();
+            return true;
+        }
+
+        @Override
+        public boolean finishComposingText() {
+            composing = "";   // stays typed
+            return true;
+        }
+
+        @Override
+        public boolean deleteSurroundingText(int beforeLength, int afterLength) {
+            for (int i = 0; i < beforeLength; i++)
+                tapKey(KeyEvent.KEYCODE_DEL);
+            for (int i = 0; i < afterLength; i++)
+                tapKey(KeyEvent.KEYCODE_FORWARD_DEL);
+            return true;
+        }
+
+        @Override
+        public boolean performEditorAction(int editorAction) {
+            tapKey(KeyEvent.KEYCODE_ENTER);   // Done
+            return true;
+        }
     }
 
     // ---- files ----

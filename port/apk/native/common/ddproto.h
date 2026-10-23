@@ -19,6 +19,7 @@ enum {
     DD_KEY,           // a=SDL scancode b=1 down / 0 up
     DD_RELEASE,       // a=buffer index: the app no longer shows it, the game may draw into it again
     DD_FOCUS,         // a=1 the game is on screen / 0 it isn't (the game ignores input without focus)
+    DD_TEXT,          // a=one typed character (Unicode code point)
 
     // game -> app
     DD_BUFFERS_MSG,   // a=count b=width c=height; followed by `count` AHardwareBuffer handle packets
@@ -27,6 +28,7 @@ enum {
     DD_CURSOR,        // a=width b=height c=hot x d=hot y; followed by one packet of width*height RGBA
     DD_CURSOR_SHOW,   // a=1 visible / 0 hidden
     DD_WARP,          // a=x b=y: the game moved the mouse
+    DD_TEXT_INPUT,    // a=1 the game wants text (keyboard up) / 0 it doesn't
 };
 
 typedef struct {

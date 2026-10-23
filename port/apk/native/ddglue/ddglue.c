@@ -11,6 +11,9 @@
 //   and a swap waits until the previous frame is on screen, so the game never draws frames nobody sees.
 // - Input: mouse/key/focus messages from the app become SDL events. A press and its release are never
 //   delivered in the same game frame (the game would miss the click or key; see sdl-tapfix/tapfix.c).
+// - Text: SDL_StartTextInput/SDL_StopTextInput open and close the app's keyboard. A typed character
+//   becomes SDL_TEXTINPUT plus a press of TEXT_KEY: the game's text fields insert the last text
+//   received only when a printable key goes down, one character per frame.
 // - Cursor: the game's colour cursors go to the app, which draws them over the frame.
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
@@ -72,6 +75,10 @@ static int buffer_fence[DD_BUFFERS] = { -1, -1, -1 };   // from DD_RELEASE: the 
 #define INPUT_MAX 256
 static dd_msg input[INPUT_MAX];   // ring buffer of input messages not yet turned into events
 static int in_head, in_len;
+// pressed after each typed character (see the file comment): a key no keyboard has, so no game
+// hotkey reacts to it, with a printable keycode, so text fields insert the character
+#define TEXT_KEY     SDL_SCANCODE_INTERNATIONAL1
+#define TEXT_KEY_SYM SDLK_a
 
 static void send_msg(int type, int a, int b, int c, int d) {
     dd_msg m = { type, a, b, c, d };
@@ -97,6 +104,13 @@ static void *reader(void *arg) {
                     close(buffer_fence[m.a]);
                 buffer_fence[m.a] = fence;
                 fence = -1;
+            }
+            break;
+        case DD_TEXT:   // the character, then its key down and up; all or nothing
+            if (in_len + 3 <= INPUT_MAX) {
+                input[(in_head + in_len++) % INPUT_MAX] = m;
+                input[(in_head + in_len++) % INPUT_MAX] = (dd_msg){ DD_KEY, TEXT_KEY, 1, 0, 0 };
+                input[(in_head + in_len++) % INPUT_MAX] = (dd_msg){ DD_KEY, TEXT_KEY, 0, 0, 0 };
             }
             break;
         default:
@@ -456,8 +470,30 @@ static int next_event(SDL_Event *e) {
         e->key.windowID = id;
         e->key.state = m.b ? SDL_PRESSED : SDL_RELEASED;
         e->key.keysym.scancode = m.a;
-        e->key.keysym.sym = SDL_GetKeyFromScancode(m.a);
+        e->key.keysym.sym = m.a == TEXT_KEY ? TEXT_KEY_SYM : SDL_GetKeyFromScancode(m.a);
         break;
+    case DD_TEXT: {   // one code point as UTF-8
+        unsigned c = m.a;
+        char *t = e->text.text;
+        if (c < 0x80) {
+            t[0] = c;
+        } else if (c < 0x800) {
+            t[0] = 0xC0 | c >> 6;
+            t[1] = 0x80 | (c & 0x3F);
+        } else if (c < 0x10000) {
+            t[0] = 0xE0 | c >> 12;
+            t[1] = 0x80 | (c >> 6 & 0x3F);
+            t[2] = 0x80 | (c & 0x3F);
+        } else {
+            t[0] = 0xF0 | c >> 18;
+            t[1] = 0x80 | (c >> 12 & 0x3F);
+            t[2] = 0x80 | (c >> 6 & 0x3F);
+            t[3] = 0x80 | (c & 0x3F);
+        }
+        e->type = SDL_TEXTINPUT;
+        e->text.windowID = id;
+        break;
+    }
     default:
         return next_event(e);
     }
@@ -541,6 +577,20 @@ int SDL_PollEvent(SDL_Event *ev) {
     }
     *ev = e;
     return 1;
+}
+
+// as in SDL: the keyboard shows only if the hint allows it. SDL's own video init starts text input
+// with the hint off, so the keyboard doesn't pop up at launch.
+void SDL_StartTextInput(void) {
+    if (!SDL_GetHintBoolean(SDL_HINT_ENABLE_SCREEN_KEYBOARD, SDL_TRUE))
+        return;
+    connect_app();
+    send_msg(DD_TEXT_INPUT, 1, 0, 0, 0);
+}
+
+void SDL_StopTextInput(void) {
+    connect_app();
+    send_msg(DD_TEXT_INPUT, 0, 0, 0, 0);
 }
 
 void SDL_WarpMouseInWindow(SDL_Window *window, int x, int y) {

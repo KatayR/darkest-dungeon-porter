@@ -53,6 +53,8 @@ The touch screen works like a laptop trackpad:
 - **Tap, then touch again and hold** to drag.
 - **Back** opens the game's Escape menu.
 
+When the game asks for text (naming the hamlet, renaming a hero), the on-screen keyboard opens and the game slides up so the field stays above it. Enter confirms. If Back hid the keyboard, a tap brings it back.
+
 ## Known limitations
 - The frame rates are exact only on 60 Hz and 120 Hz screens. Each game frame stays up for a whole number of refreshes (the refresh rate divided by the chosen rate, rounded), so on a 90 Hz screen "60" gives 45 FPS. The refresh rate is read once, when the game starts. Only 60 Hz has been tested.
 - Stay in the app while it imports the game. Android may stop the app in the background; an unfinished import is thrown away, and the next one starts over.

@@ -2,7 +2,7 @@
 // gets the game's frame buffers as AHardwareBuffers, and draws each presented frame (plus the
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
 // Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
-// positions to the game.
+// positions to the game. Tells the activity when the game wants text (it shows the keyboard).
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
 // nothing is swapped twice in one refresh, counted by a vsync thread (ddglue keeps the game from
 // drawing ahead, see DD_SURFACE).
@@ -44,6 +44,17 @@ static int window_changed;
 static float cursor_x, cursor_y;
 static int cursor_visible = 1, cursor_w, cursor_h, cursor_hx, cursor_hy, cursor_dirty;
 static unsigned char *cursor_pixels;
+
+// the activity, told when the game wants text (DD_TEXT_INPUT)
+static JavaVM *vm;
+static jobject activity;
+static jmethodID on_text_input;
+
+// recent left clicks (cursor height and time), to tell the activity where the text field may be
+#define CLICKS    16
+#define CLICK_MS  30000   // how long a click counts as recent
+static struct { float y; double ms; } clicks[CLICKS];
+static int n_clicks;      // ever made; the newest is clicks[(n_clicks - 1) % CLICKS]
 
 static void send_fenced(int type, int a, int b, int c, int fence_fd) {
     dd_msg m = { type, a, b, c, 0 };
@@ -236,6 +247,30 @@ static void present(int i) {
     }
 }
 
+// DDActivity.onTextInput(on, last click, lowest recent click), heights 0..1, from the render thread
+// (attached to the VM on first use). The game doesn't say where its text field is; the player has
+// clicked it just now, or a little earlier (a save slot, then the dialog that follows).
+static void text_input(int on) {
+    static JNIEnv *env;
+    if (!env && (*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
+        env = NULL;
+        LOG("cannot attach to the Java VM");
+        return;
+    }
+    float last = cursor_y, lowest = cursor_y;   // no recent click: where the cursor is
+    double now = now_ms();
+    pthread_mutex_lock(&lock);
+    for (int i = n_clicks - 1; i >= 0 && i >= n_clicks - CLICKS && now - clicks[i % CLICKS].ms < CLICK_MS; i--) {
+        if (i == n_clicks - 1)
+            last = lowest = clicks[i % CLICKS].y;
+        else if (clicks[i % CLICKS].y > lowest)
+            lowest = clicks[i % CLICKS].y;
+    }
+    pthread_mutex_unlock(&lock);
+    (*env)->CallVoidMethod(env, activity, on_text_input, (jboolean)on, (jfloat)(last / game_h),
+                           (jfloat)(lowest / game_h));
+}
+
 static void handle(int fd) {
     dd_msg m;
     int fence;
@@ -290,6 +325,9 @@ static void handle(int fd) {
     case DD_WARP:
         cursor_x = m.a;
         cursor_y = m.b;
+        break;
+    case DD_TEXT_INPUT:
+        text_input(m.a != 0);
         break;
     }
 }
@@ -372,9 +410,11 @@ static void *render_thread(void *arg) {
 
 // ---- JNI (org.ddport.darkest.DDActivity) ----
 JNIEXPORT jint JNICALL
-Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jstring name, jint w, jint h,
-                                               jint frame_refreshes) {
-    (void)cls;
+Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jobject act, jstring name, jint w,
+                                               jint h, jint frame_refreshes) {
+    (*env)->GetJavaVM(env, &vm);
+    activity = (*env)->NewGlobalRef(env, act);
+    on_text_input = (*env)->GetMethodID(env, cls, "onTextInput", "(ZFF)V");
     game_w = w;
     game_h = h;
     refreshes = frame_refreshes > 1 ? frame_refreshes : 1;
@@ -425,6 +465,12 @@ Java_org_ddport_darkest_DDActivity_nativeMoveCursor(JNIEnv *env, jclass cls, jfl
 JNIEXPORT void JNICALL
 Java_org_ddport_darkest_DDActivity_nativeButton(JNIEnv *env, jclass cls, jint button, jboolean down) {
     (void)env; (void)cls;
+    if (button == 1 && down) {
+        pthread_mutex_lock(&lock);
+        clicks[n_clicks % CLICKS].y = cursor_y;
+        clicks[n_clicks++ % CLICKS].ms = now_ms();
+        pthread_mutex_unlock(&lock);
+    }
     send_msg(DD_MOUSE_BUTTON, button, down);
 }
 
@@ -432,4 +478,10 @@ JNIEXPORT void JNICALL
 Java_org_ddport_darkest_DDActivity_nativeKey(JNIEnv *env, jclass cls, jint scancode, jboolean down) {
     (void)env; (void)cls;
     send_msg(DD_KEY, scancode, down);
+}
+
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativeText(JNIEnv *env, jclass cls, jint code_point) {
+    (void)env; (void)cls;
+    send_msg(DD_TEXT, code_point, 0);
 }
