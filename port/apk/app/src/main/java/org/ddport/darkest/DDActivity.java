@@ -21,11 +21,13 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioButton;
 import android.widget.RadioGroup;
+import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.io.BufferedInputStream;
@@ -67,7 +69,8 @@ import java.util.zip.ZipInputStream;
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "DDActivity";
     /** Heights the game can render at (16:9); the display scales the frames to the screen for free. */
-    private static final int[] HEIGHTS = { 1080, 900, 720, 540 };
+    private static final int[] HEIGHTS = { 2160, 1440, 1080, 900, 720, 540 };
+    private static final int DEFAULT_HEIGHT = 1080;
     /** Frame rates that divide the 60 Hz refresh evenly: each frame stays up for whole refreshes. */
     private static final int[] FPS = { 60, 30, 20, 15 };
     private static final int SCANCODE_ESCAPE = 41;   // SDL_SCANCODE_ESCAPE
@@ -95,7 +98,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         Intent intent = getIntent();
         if (intent.hasExtra("height"))
-            start(intent.getIntExtra("height", HEIGHTS[0]), intent.getIntExtra("fps", FPS[0]));
+            start(intent.getIntExtra("height", DEFAULT_HEIGHT), intent.getIntExtra("fps", FPS[0]));
         else
             showLaunchScreen();
         hideSystemBars();   // needs the content view
@@ -108,12 +111,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         }
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
-        RadioGroup heights = choices(c, h -> h * 16 / 9 + " × " + h, HEIGHTS, prefs.getInt("height", HEIGHTS[0]));
+        Spinner heights = dropdown(c, h -> h * 16 / 9 + " × " + h + (h == 2160 ? " (4K)" : ""), HEIGHTS,
+                prefs.getInt("height", DEFAULT_HEIGHT));
         RadioGroup rates = choices(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
         Button play = new Button(c);
         play.setText("Play");
         play.setOnClickListener(b -> {
-            int height = heights.getCheckedRadioButtonId(), fps = rates.getCheckedRadioButtonId();
+            int height = HEIGHTS[heights.getSelectedItemPosition()], fps = rates.getCheckedRadioButtonId();
             prefs.edit().putInt("height", height).putInt("fps", fps).apply();
             start(height, fps);
         });
@@ -145,6 +149,23 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         }
         group.check(checked);
         return group;
+    }
+
+    /** A dropdown of the values' labels; `selected` (else the first) is shown. */
+    private static Spinner dropdown(Context c, IntFunction<String> label, int[] values, int selected) {
+        String[] labels = new String[values.length];
+        int shown = 0;
+        for (int i = 0; i < values.length; i++) {
+            labels[i] = label.apply(values[i]);
+            if (values[i] == selected)
+                shown = i;
+        }
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(c, android.R.layout.simple_spinner_item, labels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        Spinner spinner = new Spinner(c);
+        spinner.setAdapter(adapter);
+        spinner.setSelection(shown);
+        return spinner;
     }
 
     private static TextView label(Context c, String text) {

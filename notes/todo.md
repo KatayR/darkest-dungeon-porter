@@ -865,6 +865,17 @@ Goal: any phone needs only the APK and GOG's Linux installer (`darkest_dungeon_2
   - Greps over every published file find no personal strings.
   - **Not verified on a phone yet** (none was connected): the launcher icon on the home screen, and an update install over the existing one.
 
-## Next: 2K (1440p) rendering
-- [ ] Add 1440 to the launch screen's resolutions and measure it on the OnePlus 5 and the A34: FPS in the dungeon and in battle, GPU load, heat. Both screens are 1080p, so 1440p renders more pixels than are shown and is scaled down.
+## 1440p and 4K rendering (2026-10-23)
+- [x] The launch screen's resolution is now a dropdown: 4K, 1440p, 1080p (default), 900p, 720p and 540p. Frames above the screen's size are scaled down by the display.
+- [x] Galaxy A34, standing in a dungeon room for 30 s per setting (game / shown FPS, GPU busy and clock; the GPU tops out at 950 MHz):
+  | Setting | FPS | GPU | AP / BAT / SKIN °C |
+  |---|---|---|---|
+  | 1440p / 60 | 59.5–60.3 / 59–61 | 72–100%, 420–563 MHz | 33.4 / 26.5 / 33.7 |
+  | 1440p / 30 | 29.6–30.2 / 29–31 | mostly 10–20%, 385 MHz | 32.2 / 26.9 / 34.4 |
+  | 4K / 60 | 59.8–60.3 / 59–61 | 75–100%, 683–950 MHz | 35.7 / 27.4 / 36.1 |
+  | 4K / 30 | 29.8–30.2 / 30 | 19–100%, 385–634 MHz | 33.4 / 28.2 / 35.1 |
+- [ ] Not measured: the OnePlus 5 at 1440p and 4K, battles at these sizes, and longer sessions (4K/60 runs the A34's GPU near its top clock).
 - Battle at 1080p on the OnePlus 5 (2026-10-23, about 3 minutes): walking holds 60, but battles run mostly 49–58 FPS, with dips about every 5 s and three one-second drops to ~30. During the dips the GPU runs at 515–710 MHz and is 94–98% busy. Not investigated yet.
+
+## Next: import and export saves
+- [ ] Copy the game's saves (`files/.local/share/Red Hook Studios/Darkest`) out of and into the app through the system file picker, so they survive an uninstall and can move between devices.

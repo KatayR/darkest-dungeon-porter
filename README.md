@@ -20,7 +20,7 @@ Runs your own GOG copy of **Darkest Dungeon®** (the Linux version) natively on 
 | Device | GPU | Android | Result |
 |---|---|---|---|
 | OnePlus 5 | Adreno 540 | LineageOS 22 (Android 15) | Title and dungeon at 1080p / 60 FPS |
-| Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS |
+| Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS; dungeon also at 1440p and 4K, at 60 and 30 FPS |
 
 Other devices may work. Reports are welcome.
 
@@ -33,7 +33,7 @@ Other devices may work. Reports are welcome.
 4. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer.
    - The app unpacks only the game data and converts six shaders to OpenGL ES.
    - You can delete the installer afterwards.
-5. Choose a resolution (1080/900/720/540) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery.
+5. Choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
 
 Saves are kept in the app's private storage, so uninstalling the app deletes them.
 
