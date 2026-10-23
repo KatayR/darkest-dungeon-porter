@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-This licence covers the port's own code and scripts in this repository. The patches in
-port/apk/patches/ modify third-party projects and are under the licence of the project they patch;
-see port/apk/app/src/main/assets/THIRD_PARTY_NOTICES.txt.

@@ -1,2 +1,4 @@
 # Everything here runs on the phone (Linux/Android): keep LF line endings.
 * text=auto eol=lf
+# except Windows batch files (gradlew.bat), which cmd.exe needs with CRLF
+*.bat text eol=crlf

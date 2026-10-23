@@ -23,7 +23,7 @@ The aim is to run the owned GOG copy of Darkest Dungeon on an Android phone with
 - **adb:** adb (Android SDK platform-tools) is available, and the device is authorized.
 
 ## Phase 0: Housekeeping (first execution step)
-- [x] Copy this plan to `notes/todo.md` and create `notes/lessons.md`.
+- [x] Plan written to `notes/todo.md`; `notes/lessons.md` created.
 - [x] Extracted the archive to a local copy of the Linux game (a filtered extract only got top-level files, so the whole archive was extracted). Verified: all 8,280 `data/` files present, `unzip -t` clean. (9,529 entries = 8,339 files + dirs; the other 59 files are installer themes under `meta/`.)
 
 ## Phase 1: Proof of life (Termux + root chroot + VirGL)
@@ -160,7 +160,7 @@ The screen stays on and unlocked with Termux:X11 in front (`svc power stayon usb
 
 ## Phase 2 plan (2026-10-21)
 ### Context
-**Phases 0–1 are done** (commits 3e9eec8 and af1bad0, plus the uncommitted FPS work). The game runs in a rooted Debian chroot through Box64 (glibc build), VirGL and Termux:X11, at about 51 FPS at 720p.
+**Phases 0–1 are done** (committed, plus the then-uncommitted FPS work). The game runs in a rooted Debian chroot through Box64 (glibc build), VirGL and Termux:X11, at about 51 FPS at 720p.
 
 **Why that path is capped:** every frame is read back from the GPU and copied through X11. That costs about 13 ms per megapixel, while the GPU is only 14% busy.
 
@@ -214,7 +214,7 @@ port/apk/
 ### Steps
 
 #### 2.0 Housekeeping
-- [x] Copy this plan into `notes/todo.md` as the Phase 2 section. Remind about committing the pending FPS work first.
+- [x] Phase 2 plan added to `notes/todo.md` as its own section (the pending FPS work to be committed before it).
 
 #### 2.1 Feasibility gate: bionic Box64 vs. glibc binaries (no APK yet, adb shell only)
 - [x] Build Box64 with the NDK (generic ARM64 dynarec, not SD845), as a plain executable.
@@ -623,7 +623,7 @@ App process (Java, no SDL)                          Child process (exec'd: libdd
   - every 10 s: FPS (ddglue), GPU MHz and busy%, `quiet_therm`/`msm_therm`/battery temperature, `current_now`;
   - the result is averages plus the last 5 minutes (temperatures settle late).
   - Adb over Wi-Fi (`adb tcpip`) so the phone is not charging during the run.
-- [x] Baseline run with `9d4d402`. The same run follows each step below.
+- [x] Baseline run with the committed build. The same run follows each step below.
   - **Baseline** (15 min standing at the fixed test spot, phone without cover, brightness 204 manual, charging held off; game warm for ~1 h before): **2.36 W** (last 5 min 2.34), GPU 414 MHz (3 of 90 samples at 515) at 78% busy, CPU little ~1.8 GHz / big ~2.2 GHz, surface 39 °C, board 44 °C, battery 34–35 °C, FPS median 59.9 (58.8–61.9).
 
 - **Step 1: what does the fb0 pass cost, and why (measure only, temporary builds)**
@@ -773,7 +773,7 @@ App process (Java, no SDL)                          Child process (exec'd: libdd
   - The GPU (83% busy at 342 MHz) and the display remain; step 4 (display-hardware presentation, −85 mW measured) is the next real saving.
 
 #### Back button and a launch screen for resolution and FPS (2026-10-23)
-- [x] **Back opens the game's Escape menu** (commit 3a3646d). A tapped Back sends key down and up together, and the game folds input into per-frame state, so they cancelled out (only a long press worked). ddglue now holds key releases like mouse-tap releases (at least 2 frames and 60 ms); a held Back sends Escape once.
+- [x] **Back opens the game's Escape menu.** A tapped Back sends key down and up together, and the game folds input into per-frame state, so they cancelled out (only a long press worked). ddglue now holds key releases like mouse-tap releases (at least 2 frames and 60 ms); a held Back sends Escape once.
 - [x] **Launch screen** (plain Android views, before the game starts, every launch, last choice preselected): resolution 1920×1080 / 1600×900 / 1280×720 / 960×540, frame rate 60 / 30 / 20 / 15 (only rates that divide 60 Hz, so frames stay up for whole refreshes), Play set well below the choices. The choice is saved in SharedPreferences. Intent extras `height` and `fps` skip it (for scripts).
   - 900 and 540 are new sizes: keep each only if title, save list and dungeon render correctly (a gl4es bug once showed at one size only).
 - [x] **Size:** the chosen size replaces the `GAME_W/GAME_H` constants (SurfaceView fixed size, `nativeStart`, cursor-speed scaling).
@@ -864,3 +864,7 @@ Goal: any phone needs only the APK and GOG's Linux installer (`darkest_dungeon_2
   - Signed with a throwaway test key, `apksigner` verifies the release APK; without the key the release build is `app-release-unsigned.apk`.
   - Greps over every published file find no personal strings.
   - **Not verified on a phone yet** (none was connected): the launcher icon on the home screen, and an update install over the existing one.
+
+## Next: 2K (1440p) rendering
+- [ ] Add 1440 to the launch screen's resolutions and measure it on the OnePlus 5 and the A34: FPS in the dungeon and in battle, GPU load, heat. Both screens are 1080p, so 1440p renders more pixels than are shown and is scaled down.
+- Battle at 1080p on the OnePlus 5 (2026-10-23, about 3 minutes): walking holds 60, but battles run mostly 49–58 FPS, with dips about every 5 s and three one-second drops to ~30. During the dips the GPU runs at 515–710 MHz and is 94–98% busy. Not investigated yet.

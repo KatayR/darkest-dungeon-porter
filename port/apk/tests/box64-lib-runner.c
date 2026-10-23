@@ -1,5 +1,5 @@
 // Loads libbox64.so (BOX64_SHARED build) with dlopen and runs an x86_64 program through box64_run(),
-// the way the app's SDL_main will. Tests the shared-library build without an APK.
+// the way libddhost does. Tests the shared-library build without an APK.
 // Usage: box64-lib-runner /path/libbox64.so ./program [args...]
 // Build (NDK): aarch64-linux-android31-clang -o box64-lib-runner box64-lib-runner.c
 #include <dlfcn.h>

@@ -12,7 +12,7 @@ Project rules learned from mistakes made during the port.
 - Before calling a lower FPS a regression, A/B the committed build in the same scene. The Ruins room stood at 51–54 after a change, but the committed build did 48–52 there: the room was slow before.
 
 ## Plan gates
-- When a gate's result goes past its threshold (the plan said "a handful of missing symbols"; the result was ~35 plus ABI differences), stop and re-plan with options. Don't quietly decide it's "still patchable" and keep building. The gate exists so that choice is made deliberately, with the options written down.
+- A gate whose result goes past its threshold (the plan said "a handful of missing symbols"; the result was ~35 plus ABI differences) stops the work until it is re-planned, with the options written down. It is not quietly judged "still patchable" while building goes on: the gate exists so that choice is made deliberately.
 
 ## Android storage and shell
 - Edit files in an app's external storage through the FUSE path (`/storage/emulated/0/...`), never underneath it in `/data/media`. Changes made below FUSE left the app seeing the old file sizes, so the game read truncated shaders and failed with no useful error.
@@ -32,8 +32,8 @@ Project rules learned from mistakes made during the port.
 - Emulating a missing feature (3D textures as a 2D slice atlas) can go wrong in driver-specific ways that a CPU reference never reproduces. When the driver has the real extension (`GL_OES_texture_3D` here), switch to it before debugging the emulation further. Four disproven hypotheses went into the atlas; real 3D textures fixed it in one go.
 - When the main thread waits in the driver (`waittimestamp`) under a draw call, time each draw call on the CPU and log the slow ones, with their textures and index ranges. Here one draw per frame waited ~9 ms. The cause was not its texture but client arrays: Adreno copies vertices from the attribute pointer up to the highest index, and the game indexes deep into one big ring buffer.
 
-## Explaining experiments
-- When trying a setting, say where the value comes from (its documentation, the profile line it targets) before running it. A bare "try X=0" reads as a random guess even when it's the one switch for the measured cause.
+## Recording experiments
+- Every setting tried gets its source written next to it (its documentation, the profile line it targets) before the run. A bare "try X=0" reads as a random guess even when it's the one switch for the measured cause.
 
 ## Frame pacing
 - An FPS locked to an exact divisor of the refresh rate (30, 20) means frames are losing vsync slots to something, not running out of CPU or GPU. Look at who calls `eglSwapBuffers` and how often (here: one cursor redraw per touch event).
@@ -58,4 +58,4 @@ Project rules learned from mistakes made during the port.
 ## Installing on a phone without root
 - The normal way is the app's own import: open it, tap "Import game" and pick GOG's Linux installer. It unpacks the game and patches the shaders itself. The steps below are the fallback by adb.
 - `adb push` into `/sdcard/Android/data/<pkg>/files/` leaves folders owned by `shell` with mode `rws---`, which the app can't open ("game data missing"), although `run-as` can read them. Push, then copy the folder as the app: `run-as org.ddport.darkest cp -r <pushed> <files>/game` (2.3 GB in ~14 s), and delete the pushed copy. Then run `patch-shaders.sh` (now in `port/apk/app/src/main/assets/`) the same way (`run-as ... sh /data/local/tmp/patch-shaders.sh <game>`), or shaders fail to compile.
-- Read the game log with `run-as org.ddport.darkest cat files/dd.log` (the APK is debuggable).
+- Read the game log with `run-as org.ddport.darkest cat files/dd.log` (debug builds only; release builds are not debuggable, so `run-as` refuses them).

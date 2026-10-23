@@ -18,7 +18,7 @@ PATCHES=$(cd "$(dirname "$0")/patches" && pwd)
 BOX64_COMMIT=d96343fbb          # same as the chroot build on the phone
 GL4ES_COMMIT=a025615b           # master after the Adreno highp fixes (PR #509)
 SDL2_TAG=release-2.32.10
-DEB=https://deb.debian.org/debian/pool/main/g/gcc-12
+DEB=https://snapshot.debian.org/archive/debian/20250415T084322Z/pool/main/g/gcc-12   # permanent; the live pool drops old versions
 DEB_VER=12.2.0-14+deb12u1
 
 mkdir -p "$DD_BUILD/src" "$DD_BUILD/build" "$DD_BUILD/out/jniLibs/arm64-v8a" "$DD_BUILD/out/assets/x64lib"
@@ -55,7 +55,7 @@ cp "$DD_BUILD/build/box64-lib/libbox64.so" "$DD_BUILD/src/gl4es/lib/libGL.so" "$
 # x86_64 C++ runtime for the game: box64 doesn't wrap libstdc++/libgcc_s on Android
 for pkg in libstdc++6 libgcc-s1; do
     deb="$DD_BUILD/build/${pkg}_amd64.deb"
-    [ -s "$deb" ] || curl -sfo "$deb" "$DEB/${pkg}_${DEB_VER}_amd64.deb"
+    [ -s "$deb" ] || curl -sfLo "$deb" "$DEB/${pkg}_${DEB_VER}_amd64.deb"
     rm -rf "$DD_BUILD/build/$pkg" && mkdir -p "$DD_BUILD/build/$pkg"
     (cd "$DD_BUILD/build/$pkg" && /c/Windows/System32/tar.exe -xf "$deb" && /c/Windows/System32/tar.exe -xf data.tar.xz)
 done

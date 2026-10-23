@@ -3,13 +3,16 @@
 # sysconf names, nl_langinfo items and glob flags to their bionic names.
 # Usage: gen-glibc-consts.sh NDK_SYSROOT_INCLUDE OUT_HEADER
 #   Needs adb (on PATH; ANDROID_SERIAL picks the device) and a rooted phone with a Debian chroot at
-#   /data/local/dd/debian holding x86_64-linux-gnu-gcc and a glibc box64 (port/phone/). RX is a script
-#   that runs its argument as root on the phone. The generated header is already part of
-#   box64-glibc-on-bionic.patch: this is only needed to regenerate it.
+#   /data/local/dd/debian holding x86_64-linux-gnu-gcc and a glibc box64 (port/phone/).
+#   RX is the path of a local script (not in the repo) that runs its one argument, a shell command
+#   line, as root on the phone and prints its output, for example:
+#     MSYS_NO_PATHCONV=1 adb shell "su -c '$1'"
+#   The generated header is already part of box64-glibc-on-bionic.patch: this is only needed to
+#   regenerate it.
 set -e
 W=$(mktemp -d -p "$(dirname "$2")") && trap 'rm -rf "$W"' EXIT
 INC=$1 OUT=$2
-RX=${RX:?set RX to the rx.sh that runs root commands on the phone}
+RX=${RX:?set RX to a script that runs its argument as root on the phone, e.g. adb shell \"su -c \'\$1\'\" (see the header)}
 
 names() { grep -hoE "^#define +$1[A-Z0-9_]* " "$2" | awk '{print $2}' | sort -u; }
 {

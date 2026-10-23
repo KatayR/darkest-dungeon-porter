@@ -10,7 +10,7 @@ Runs your own GOG copy of **Darkest Dungeon®** (the Linux version) natively on 
 ## Requirements
 - Android 12 or newer, 64-bit ARM (arm64-v8a).
 - A GPU with OpenGL ES 2 and `GL_OES_texture_3D` (the game's colour grading needs it).
-- About 2.5 GB of free storage for the imported game.
+- About 4.5 GB of free storage for the import: the installer (about 1.9 GB) plus 2.5 GB for the game (the import doesn't start with less free). Afterwards you can delete the installer, and the game uses about 2.5 GB.
 - GOG's **Linux** installer of Darkest Dungeon (`darkest_dungeon_…_linux_….sh`).
   - Tested with build 27988.
   - The Steam build is not supported.
@@ -19,18 +19,21 @@ Runs your own GOG copy of **Darkest Dungeon®** (the Linux version) natively on 
 
 | Device | GPU | Android | Result |
 |---|---|---|---|
-| OnePlus 5 | Adreno 540 | LineageOS 22 (Android 15) | Title and dungeon at 1080p / 60 FPS (town and battle not yet measured at 1080p) |
-| Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS; import from the installer |
+| OnePlus 5 | Adreno 540 | LineageOS 22 (Android 15) | Title and dungeon at 1080p / 60 FPS |
+| Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS |
 
 Other devices may work. Reports are welcome.
 
 ## Install and first run
-1. Install the APK (from the Releases page, or built yourself as described below).
-2. Copy GOG's Linux installer (`.sh`) to the phone, for example into `Download/`.
-3. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer.
+1. Install the APK (from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases), or built yourself as described below).
+2. Log in to your GOG account on gog.com.
+3. Download the Linux installer of the game: https://www.gog.com/downloads/darkest_dungeon/en3installer0
+   - The link only works while you are logged in to an account that owns Darkest Dungeon.
+   - The file is called `darkest_dungeon_…_linux_….sh` and is about 1.9 GB.
+4. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer.
    - The app unpacks only the game data and converts six shaders to OpenGL ES.
    - You can delete the installer afterwards.
-4. Choose a resolution (1080/900/720/540) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery.
+5. Choose a resolution (1080/900/720/540) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery.
 
 Saves are kept in the app's private storage, so uninstalling the app deletes them.
 
@@ -42,6 +45,11 @@ The touch screen works like a laptop trackpad:
 - **Tap, then touch again and hold** to drag.
 - **Back** opens the game's Escape menu.
 
+## Known limitations
+- The frame rates are exact only on 60 Hz and 120 Hz screens. Each game frame stays up for a whole number of refreshes (the refresh rate divided by the chosen rate, rounded), so on a 90 Hz screen "60" gives 45 FPS. The refresh rate is read once, when the game starts. Only 60 Hz has been tested.
+- Stay in the app while it imports the game. Android may stop the app in the background; an unfinished import is thrown away, and the next one starts over.
+- Release builds are not debuggable, so the game's `dd.log` can't be read from them (see the notes under Building).
+
 ## How it works
 The app runs as two processes:
 
@@ -49,7 +57,8 @@ The app runs as two processes:
 app process (Java + libddview.so)                     game process (libddhost.so, started by the app)
   launch / import screens                               Box64 as a shared library, built against Android's libc
   shows the game's frames, draws the cursor   <-- frames + fences --   x86_64 darkest.bin, FMOD, libstdc++
-  touch -> trackpad, Back -> Escape           -- input -->             libddglue.so  (stands in for SDL2: GLES context, frames, input)
+  touch -> trackpad, Back -> Escape           -- input -->             libddglue.so  (stands in for SDL2: GLES context, frames, input;
+                                                                                        the rest goes to the real libSDL2.so)
                                                                          libGL.so      (gl4es: OpenGL 2.1 -> GLES 2)
                                                                          libddaudio.so (stands in for ALSA: FMOD's output -> AAudio)
 ```
@@ -68,8 +77,10 @@ The build scripts are tested on **Windows with Git Bash**. Linux and macOS hosts
 
 **Needed:**
 - Android SDK with NDK 27.1.12297006, CMake 3.22.1 and 4.1.2;
-- JDK 17 (Android Studio's bundled JBR works);
+- JDK 17 or newer (Android Studio's bundled JBR works);
 - git, curl and Python 3.
+
+`ANDROID_SDK` sets the SDK location (default `%LOCALAPPDATA%\Android\Sdk`), and `JAVA_HOME` the JDK (default Android Studio's JBR, `C:\Program Files\Android\Android Studio\jbr`).
 
 ```bash
 port/apk/build-natives.sh          # fetches pinned Box64, gl4es and SDL2, applies port/apk/patches, builds them
@@ -84,7 +95,7 @@ port/apk/build-apk.sh release      # release APK (signing below)
 
 **Notes:**
 - Release builds are not debuggable.
-- The game's log is written to `dd.log` in the app's files folder, and the frame rate is logged to logcat, which helps with bug reports.
+- For bug reports: the app, gl4es and the glue libraries log to logcat (`adb logcat -s DDActivity ddview ddglue ddaudio LIBGL`), including the frame rate once a second. The game process's own output (Box64 and the game) goes to `dd.log` in the app's private files folder, which only a debug build can read: `adb shell run-as org.ddport.darkest cat files/dd.log`.
 - The launcher icon is generated by `port/apk/icon/make-icon.py`.
 
 ## Credits and licence
