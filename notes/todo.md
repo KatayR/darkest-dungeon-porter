@@ -912,3 +912,7 @@ Steam's Linux depots ship the same DRM-free `_linuxnosteam` build as GOG (Build 
     - the bat's Y/N cleanup question in a real console (the test ran with empty stdin);
     - a clean double-click on another PC;
     - DLCs in play, and The Butcher's Circus PvP, which normally goes through Steam.
+- [x] Release 0.4.0 (versionCode 4).
+  - Signed with the same upload key as 0.3.1 (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), so 0.3.1 installs update in place.
+  - Published on GitHub with `get-steam-game.bat`.
+  - Not installed on a phone: both test phones run debug builds, and switching signatures means an uninstall, which deletes the saves.

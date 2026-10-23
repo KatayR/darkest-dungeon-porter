@@ -35,7 +35,7 @@ Other devices may work. Reports are welcome.
         - The file is called `darkest_dungeon_…_linux_….sh` and is about 1.9 GB.
    - **From Steam** (needs a Windows 10 or 11 PC with Steam):
      1. Start Steam and log in to the account that owns Darkest Dungeon.
-     2. Download [`get-steam-game.bat`](port/steam/get-steam-game.bat) and double-click it.
+     2. Download `get-steam-game.bat` from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases) (or [from the repo](port/steam/get-steam-game.bat)) and double-click it.
         - It asks the running Steam to download the game's Linux files (and the DLCs you own) to Steam's `steamapps\content` folder, then packs what the phone needs into `darkest-dungeon-steam.zip` next to the bat.
         - It is a plain batch file, so you can read what it does first. It uses only tools built into Windows.
         - It needs about 5 GB free and takes a few minutes, mostly Steam's download. At the end it offers to delete the downloaded files; the zip holds everything.
