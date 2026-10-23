@@ -25,8 +25,6 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -113,42 +111,24 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
         Spinner heights = dropdown(c, h -> h * 16 / 9 + " × " + h + (h == 2160 ? " (4K)" : ""), HEIGHTS,
                 prefs.getInt("height", DEFAULT_HEIGHT));
-        RadioGroup rates = choices(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
+        Spinner rates = dropdown(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
         Button play = new Button(c);
         play.setText("Play");
         play.setOnClickListener(b -> {
-            int height = HEIGHTS[heights.getSelectedItemPosition()], fps = rates.getCheckedRadioButtonId();
+            int height = HEIGHTS[heights.getSelectedItemPosition()], fps = FPS[rates.getSelectedItemPosition()];
             prefs.edit().putInt("height", height).putInt("fps", fps).apply();
             start(height, fps);
         });
         play.setMinWidth(400);
+        LinearLayout choices = new LinearLayout(c);   // the two dropdowns side by side
+        choices.addView(labelled(c, "Resolution (lower saves battery)", heights));
+        choices.addView(labelled(c, "Frame rate (lower saves battery)", rates));
         LinearLayout layout = column(c);
-        for (View v : new View[] { label(c, "Resolution (lower saves battery)"), heights,
-                label(c, "Frame rate (lower saves battery)"), rates, play }) {
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            if (v == play)
-                lp.topMargin = 160;   // well away from the choices, so it isn't hit by accident
-            layout.addView(v, lp);
-        }
+        layout.addView(choices, wrap());
+        LinearLayout.LayoutParams lp = wrap();
+        lp.topMargin = 160;   // well away from the choices, so it isn't hit by accident
+        layout.addView(play, lp);
         setContentView(layout);
-    }
-
-    /** One radio button per value, the button's id being its value; `selected` (else the first) is checked. */
-    private static RadioGroup choices(Context c, IntFunction<String> label, int[] values, int selected) {
-        RadioGroup group = new RadioGroup(c);
-        group.setOrientation(LinearLayout.HORIZONTAL);
-        int checked = values[0];
-        for (int i = 0; i < values.length; i++) {
-            RadioButton b = new RadioButton(c);
-            b.setText(label.apply(values[i]));
-            b.setId(values[i]);
-            group.addView(b);
-            if (values[i] == selected)
-                checked = selected;
-        }
-        group.check(checked);
-        return group;
     }
 
     /** A dropdown of the values' labels; `selected` (else the first) is shown. */
@@ -166,6 +146,20 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         spinner.setAdapter(adapter);
         spinner.setSelection(shown);
         return spinner;
+    }
+
+    /** `view` under a label, with room on both sides for a neighbour. */
+    private static LinearLayout labelled(Context c, String text, View view) {
+        LinearLayout column = column(c);
+        column.setPadding(48, 0, 48, 0);
+        column.addView(label(c, text), wrap());
+        column.addView(view, wrap());
+        return column;
+    }
+
+    private static LinearLayout.LayoutParams wrap() {
+        return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
     private static TextView label(Context c, String text) {
@@ -196,8 +190,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 + "(darkest_dungeon_…_linux_….sh) from this device's storage."));
         if (error != null)
             layout.addView(label(c, error));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams lp = wrap();
         lp.topMargin = 32;
         layout.addView(pick, lp);
         setContentView(layout);
