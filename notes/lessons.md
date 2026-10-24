@@ -59,6 +59,7 @@ Project rules learned from mistakes made during the port.
 ## Installing on a phone without root
 - The normal way is the app's own import: open it, tap "Import game" and pick GOG's Linux installer. It unpacks the game and patches the shaders itself. The steps below are the fallback by adb.
 - `adb push` into `/sdcard/Android/data/<pkg>/files/` leaves folders owned by `shell` with mode `rws---`, which the app can't open ("game data missing"), although `run-as` can read them. Push, then copy the folder as the app: `run-as org.ddport.darkest cp -r <pushed> <files>/game` (2.3 GB in ~14 s), and delete the pushed copy. Then run `patch-shaders.sh` (now in `port/apk/app/src/main/assets/`) the same way (`run-as ... sh /data/local/tmp/patch-shaders.sh <game>`), or shaders fail to compile.
+- `run-as` starts in the app's data folder, whatever the shell's `cd` was, so a relative path there points into `/data/data/<pkg>`. Give it absolute paths for external storage; a relative listing once made an installed DLC look missing.
 - Read the game log with `run-as org.ddport.darkest cat files/dd.log` (debug builds only; release builds are not debuggable, so `run-as` refuses them).
 
 ## Windows scripts (port/steam)

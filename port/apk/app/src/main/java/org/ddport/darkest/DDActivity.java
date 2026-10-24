@@ -1,9 +1,13 @@
 package org.ddport.darkest;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.ColorStateList;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.hardware.input.InputManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -21,6 +25,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -32,27 +37,30 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
@@ -64,8 +72,9 @@ import java.util.zip.ZipInputStream;
  * Runs the Linux x86_64 Darkest Dungeon in a child process (native/host: box64 + the game) and shows
  * its frames (native/ddview). The game can't run in this process: ART's heap occupies the fixed
  * addresses the game binary needs. Game data is never part of the APK: the app imports it from GOG's
- * Linux installer, or from the Steam zip that port/steam/get-steam-game.bat makes, into
- * getExternalFilesDir()/game (see importGame), and runs it through a private mirror (see mirrorGame).
+ * Linux installer (and its DLC installers), or from the Steam zip that port/steam/get-steam-game.bat
+ * makes, into getExternalFilesDir()/game (see importGame), and runs it through a private mirror (see
+ * mirrorGame).
  *
  * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
  * extras "height" and "fps" skip it.
@@ -84,7 +93,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final int SCANCODE_ESCAPE = 41;   // SDL_SCANCODE_ESCAPE
     private static final int PICK_INSTALLER = 1;     // request code of the file picker
     private static final String INSTALLER_GAME = "data/noarch/game/";   // the game folder inside the installer
-    private static final long GAME_BYTES = 2_500_000_000L;               // it holds 2.35 GB (more with DLCs)
+    private static final String GAME_BINARY = "_linuxnosteam/darkest.bin.x86_64";   // in the game folder
+    private static final String NOT_A_GAME_FILE =
+            "That file isn't a Darkest Dungeon or DLC installer from GOG, or the Steam zip.";
+    private static final String DAMAGED = "The file looks damaged or incomplete. Try copying it to the phone again.";
+    // colours of the launch and import screens
+    private static final int BACKGROUND = 0xFF121214, CARD = 0xFF1D1D21, TEXT = 0xFFF2F2F2, MUTED = 0xFFA4A4AC,
+            BUTTON = 0xFF2E2E35, ACCENT = 0xFFD9A441, ON_ACCENT = 0xFF1C1607;
 
     static {
         System.loadLibrary("ddview");
@@ -116,37 +131,137 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         if (intent.hasExtra("height"))
             start(intent.getIntExtra("height", DEFAULT_HEIGHT), intent.getIntExtra("fps", FPS[0]));
         else
-            showLaunchScreen();
+            showLaunchScreen(null, null);
         hideSystemBars();   // needs the content view
     }
 
-    private void showLaunchScreen() {
-        if (!gameBinary().exists()) {
-            showImportScreen(null);
-            return;
-        }
+    /**
+     * Two cards: the resolution and frame rate on the left; importing the game or its DLCs, and what
+     * is imported so far, on the right. Play is below them, in the middle, once the game is imported.
+     * A message from the last import, if any, opens in a dialog with the title given.
+     */
+    private void showLaunchScreen(String dialogTitle, String dialogMessage) {
+        boolean installed = gameBinary().exists();
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
         Spinner heights = dropdown(c, h -> h * 16 / 9 + " × " + h + (h == 2160 ? " (4K)" : ""), HEIGHTS,
                 prefs.getInt("height", DEFAULT_HEIGHT));
         Spinner rates = dropdown(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
-        Button play = new Button(c);
-        play.setText("Play");
+        LinearLayout settings = card(c);
+        settings.setBackground(rounded(c));
+        settings.addView(heading(c, "Settings"));
+        settings.addView(text(c, "Resolution (lower saves battery)", 14, MUTED), below(c, 16));
+        settings.addView(heights, below(c, 4));
+        settings.addView(text(c, "Frame rate (lower saves battery)", 14, MUTED), below(c, 16));
+        settings.addView(rates, below(c, 4));
+
+        // what is imported (once the game is), then the hint and the import button, at the right
+        LinearLayout files = card(c);
+        files.addView(heading(c, "Game files"));
+        if (installed) {
+            TextView title = text(c, "Imported", 12, MUTED);
+            title.setAllCaps(true);
+            title.setLetterSpacing(0.1f);
+            files.addView(title, below(c, 12));
+            List<String> imported = imported();
+            for (int i = 0; i < imported.size(); i++) {
+                TextView item = text(c, "✓  " + imported.get(i), 16, TEXT);
+                if (i > 0)   // the DLCs, after the game
+                    item.setTypeface(null, Typeface.ITALIC);
+                files.addView(item, below(c, 4));
+            }
+            files.addView(text(c, "Pick one or more of GOG's DLC installers.", 14, MUTED), below(c, 16));
+        } else {
+            files.addView(text(c, "Pick one of these:", 14, MUTED), below(c, 12));
+            files.addView(source(c, "GOG's Linux installer", "darkest_dungeon_…_linux_….sh"), below(c, 4));
+            files.addView(source(c, "The Steam zip", "darkest-dungeon-steam.zip"), below(c, 4));
+            files.addView(text(c, "For GOG, DLC installers can be picked together with the game. "
+                    + "The Steam zip already has your DLCs.", 14, MUTED), below(c, 8));
+        }
+        Button pick = button(c, installed ? "Add DLC" : "Import game", BUTTON, TEXT);
+        pick.setOnClickListener(b -> pickFiles());
+        LinearLayout.LayoutParams atRight = below(c, 12);
+        atRight.gravity = Gravity.END;
+        files.addView(pick, atRight);
+        ScrollView filesScroll = new ScrollView(c);   // the hint and many DLCs can be taller than the card
+        filesScroll.setBackground(rounded(c));
+        filesScroll.setClipToOutline(true);
+        filesScroll.addView(files);
+
+        LinearLayout cards = new LinearLayout(c);
+        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 2);
+        left.rightMargin = dp(c, 12);
+        cards.addView(settings, left);
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3);
+        right.leftMargin = dp(c, 12);
+        cards.addView(filesScroll, right);
+
+        Button play = button(c, "Play", ACCENT, ON_ACCENT);
+        play.setTextSize(18);
+        play.setMinWidth(dp(c, 240));
         play.setOnClickListener(b -> {
             int height = HEIGHTS[heights.getSelectedItemPosition()], fps = FPS[rates.getSelectedItemPosition()];
             prefs.edit().putInt("height", height).putInt("fps", fps).apply();
             start(height, fps);
         });
-        play.setMinWidth(400);
-        LinearLayout choices = new LinearLayout(c);   // the two dropdowns side by side
-        choices.addView(labelled(c, "Resolution (lower saves battery)", heights));
-        choices.addView(labelled(c, "Frame rate (lower saves battery)", rates));
-        LinearLayout layout = column(c);
-        layout.addView(choices, wrap());
-        LinearLayout.LayoutParams lp = wrap();
-        lp.topMargin = 160;   // well away from the choices, so it isn't hit by accident
-        layout.addView(play, lp);
+        play.setEnabled(installed);
+        if (!installed) {
+            play.setBackgroundTintList(ColorStateList.valueOf(BUTTON));
+            play.setTextColor(MUTED);
+        }
+        LinearLayout bottom = column(c);
+        bottom.addView(play, wrap());
+
+        LinearLayout layout = new LinearLayout(c);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setBackgroundColor(BACKGROUND);
+        layout.setPadding(dp(c, 24), dp(c, 16), dp(c, 24), dp(c, 12));
+        layout.addView(cards, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(c, 12);
+        layout.addView(bottom, lp);
         setContentView(layout);
+        if (dialogMessage != null)   // what the last import has to say
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(dialogTitle)
+                    .setMessage(dialogMessage)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+    }
+
+    /** What is imported: the game (GOG's or Steam's) and its DLCs; empty while the game is missing. */
+    private List<String> imported() {
+        List<String> names = new ArrayList<>();
+        if (!gameBinary().exists())
+            return names;
+        boolean gog = new File(gameDir(), "goggame-1450711444.info").exists();
+        names.add(gog ? "Darkest Dungeon (GOG)" : "Darkest Dungeon (Steam)");
+        String[] dlcs = new File(gameDir(), "dlc").list();
+        if (dlcs != null) {
+            Arrays.sort(dlcs);
+            for (String dlc : dlcs)
+                names.add(dlcName(dlc));
+        }
+        return names;
+    }
+
+    /** The name of the DLC in dlc/<id>_<key>; an unknown key is shown with its words capitalised. */
+    private static String dlcName(String folder) {
+        String key = folder.replaceFirst("^\\d+_", "");
+        switch (key) {
+            case "musketeer": return "The Musketeer";
+            case "crimson_court": return "The Crimson Court";
+            case "shieldbreaker": return "The Shieldbreaker";
+            case "color_of_madness": return "The Color of Madness";
+            case "arena_mp": return "The Butcher's Circus";
+            case "fires_edge": return "The Fire's Edge";
+        }
+        StringBuilder s = new StringBuilder();
+        for (String word : key.split("_"))
+            if (!word.isEmpty())
+                s.append(s.length() > 0 ? " " : "").append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
+        return s.toString();
     }
 
     /** A dropdown of the values' labels; `selected` (else the first) is shown. */
@@ -158,7 +273,16 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             if (values[i] == selected)
                 shown = i;
         }
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(c, android.R.layout.simple_spinner_item, labels);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(c, android.R.layout.simple_spinner_item, labels) {
+            @Override
+            public View getView(int position, View convertView, ViewGroup parent) {   // the closed dropdown
+                TextView t = (TextView) super.getView(position, convertView, parent);
+                t.setTextSize(16);
+                t.setTextColor(TEXT);
+                t.setPadding(0, t.getPaddingTop(), t.getPaddingRight(), t.getPaddingBottom());
+                return t;
+            }
+        };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         Spinner spinner = new Spinner(c);
         spinner.setAdapter(adapter);
@@ -166,13 +290,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return spinner;
     }
 
-    /** `view` under a label, with room on both sides for a neighbour. */
-    private static LinearLayout labelled(Context c, String text, View view) {
-        LinearLayout column = column(c);
-        column.setPadding(48, 0, 48, 0);
-        column.addView(label(c, text), wrap());
-        column.addView(view, wrap());
-        return column;
+    private static int dp(Context c, float dp) {
+        return Math.round(dp * c.getResources().getDisplayMetrics().density);
     }
 
     private static LinearLayout.LayoutParams wrap() {
@@ -180,12 +299,67 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
-    private static TextView label(Context c, String text) {
+    /** Wrapped, `dp` below the view before it. */
+    private static LinearLayout.LayoutParams below(Context c, float dp) {
+        LinearLayout.LayoutParams lp = wrap();
+        lp.topMargin = dp(c, dp);
+        return lp;
+    }
+
+    private static TextView text(Context c, String text, float sp, int color) {
         TextView t = new TextView(c);
         t.setText(text);
-        t.setPadding(0, 32, 0, 8);
-        t.setGravity(Gravity.CENTER);
+        t.setTextSize(sp);
+        t.setTextColor(color);
+        t.setLineSpacing(0, 1.1f);
         return t;
+    }
+
+    /** A bullet naming something the import takes, with its file name in monospace under it. */
+    private static LinearLayout source(Context c, String what, String file) {
+        LinearLayout item = new LinearLayout(c);
+        item.setOrientation(LinearLayout.VERTICAL);
+        item.setPadding(dp(c, 8), 0, 0, 0);
+        item.addView(text(c, "•  " + what, 14, TEXT));
+        TextView name = text(c, file, 13, MUTED);
+        name.setTypeface(Typeface.MONOSPACE);
+        name.setPadding(dp(c, 18), 0, 0, 0);
+        item.addView(name);
+        return item;
+    }
+
+    private static TextView heading(Context c, String text) {
+        TextView t = text(c, text, 20, TEXT);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        return t;
+    }
+
+    private static Button button(Context c, String text, int background, int color) {
+        Button b = new Button(c);
+        b.setText(text);
+        b.setAllCaps(false);
+        b.setTextSize(16);
+        b.setTextColor(color);
+        b.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        b.setBackgroundTintList(ColorStateList.valueOf(background));
+        b.setMinWidth(dp(c, 200));
+        return b;
+    }
+
+    /** A card's content: views stacked from the top, left-aligned. */
+    private static LinearLayout card(Context c) {
+        LinearLayout card = new LinearLayout(c);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(c, 20), dp(c, 12), dp(c, 20), dp(c, 12));
+        return card;
+    }
+
+    /** A card's background: a rounded panel. */
+    private static GradientDrawable rounded(Context c) {
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(CARD);
+        background.setCornerRadius(dp(c, 16));
+        return background;
     }
 
     private static LinearLayout column(Context c) {
@@ -195,48 +369,47 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return layout;
     }
 
-    /** Shown while the game is missing: GOG's Linux installer or the Steam zip is picked here and imported. */
-    private void showImportScreen(String error) {
-        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
-        Button pick = new Button(c);
-        pick.setText("Import game");
-        pick.setMinWidth(400);
-        pick.setOnClickListener(b -> startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT)
-                .addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), PICK_INSTALLER));
-        LinearLayout layout = column(c);
-        layout.addView(label(c, "The game isn't installed yet. Pick GOG's Linux installer of Darkest Dungeon\n"
-                + "(darkest_dungeon_…_linux_….sh), or darkest-dungeon-steam.zip made by get-steam-game.bat\n"
-                + "(Steam), from this device's storage."));
-        if (error != null)
-            layout.addView(label(c, error));
-        LinearLayout.LayoutParams lp = wrap();
-        lp.topMargin = 32;
-        layout.addView(pick, lp);
-        setContentView(layout);
+    /** The system file picker, for one or more installers or zips. */
+    private void pickFiles() {
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_INSTALLER);
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == PICK_INSTALLER && resultCode == RESULT_OK && data != null && data.getData() != null)
-            importGame(data.getData());
+        if (requestCode != PICK_INSTALLER || resultCode != RESULT_OK || data == null)
+            return;
+        List<Uri> files = new ArrayList<>();
+        if (data.getClipData() != null)   // several files picked
+            for (int i = 0; i < data.getClipData().getItemCount(); i++)
+                files.add(data.getClipData().getItemAt(i).getUri());
+        else if (data.getData() != null)
+            files.add(data.getData());
+        if (!files.isEmpty())
+            importGame(files);
     }
 
-    /** Unpacks the game from the picked installer on a background thread, showing the progress. */
-    private void importGame(Uri installer) {
+    /** Unpacks the picked installers or zips on a background thread, showing the progress. */
+    private void importGame(List<Uri> files) {
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
         ProgressBar bar = new ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
+        bar.setProgressTintList(ColorStateList.valueOf(ACCENT));
         LinearLayout layout = column(c);
-        layout.addView(label(c, "Importing the game (stay in the app)…"));
-        layout.addView(bar, new LinearLayout.LayoutParams(800, LinearLayout.LayoutParams.WRAP_CONTENT));
+        layout.setBackgroundColor(BACKGROUND);
+        layout.addView(text(c, "Importing. Please keep the app open until this finishes.", 16, TEXT), wrap());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(c, 360), LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(c, 16);
+        layout.addView(bar, lp);
         setContentView(layout);
         new Thread(() -> {
             try {
-                unpackGame(installer, percent -> handler.post(() -> bar.setProgress(percent)));
-                handler.post(this::showLaunchScreen);
+                String note = unpackGame(files, percent -> handler.post(() -> bar.setProgress(percent)));
+                handler.post(() -> showLaunchScreen("Already imported", note));
             } catch (Exception e) {
                 Log.e(TAG, "import failed", e);
-                handler.post(() -> showImportScreen("Import failed: " + e.getMessage()));
+                String why = e.getMessage() != null ? e.getMessage() : e.toString();
+                handler.post(() -> showLaunchScreen("Couldn't import", why));
             }
         }).start();
     }
@@ -753,83 +926,223 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     private File gameBinary() {
-        return new File(gameDir(), "_linuxnosteam/darkest.bin.x86_64");
+        return new File(gameDir(), GAME_BINARY);
     }
 
     /**
-     * Unpacks the game into game.import/, patches its shaders and renames it to game/, so a
-     * half-finished import is never taken for the game. GOG's Linux installer is a shell script
-     * followed by a zip that holds the game in data/noarch/game/; the Steam zip holds it at its root.
-     * The zip is streamed from where it starts in the file, never copied.
+     * Unpacks the picked files into game.import/. With the game among them, its shaders are patched
+     * and game.import/ is renamed to game/; with only DLCs, their folders are moved into the installed
+     * game. So a half-finished import is never taken for the game or a DLC. GOG's Linux installers
+     * (the game's and each DLC's) are a shell script followed by a zip that holds the files in
+     * data/noarch/game/; the Steam zip holds the game at its root. Each zip is streamed from where it
+     * starts in the file, never copied. A DLC installer whose DLC is imported already, or comes in
+     * another picked file, is skipped. Returns a note on the DLCs skipped as imported already, or null.
      */
-    private void unpackGame(Uri installer, IntConsumer progress) throws Exception {
+    private String unpackGame(List<Uri> files, IntConsumer progress) throws Exception {
         File game = gameDir(), tmp = new File(game.getParentFile(), "game.import");
         deleteTree(tmp);   // left by an import that didn't finish
+        List<GameZip> zips = new ArrayList<>();
+        int games = 0;
+        for (Uri file : files)
+            try (FileChannel ch = open(file)) {
+                GameZip z = new GameZip(ch);
+                zips.add(z);
+                if (z.game)
+                    games++;
+                else if (z.dlcs.isEmpty())
+                    throw new IOException(NOT_A_GAME_FILE);
+            }
+        boolean installed = gameBinary().exists();
+        if (games > 1)
+            throw new IOException("Please pick only one copy of the game.");
+        if (installed && games > 0)
+            throw new IOException("The game is already imported. To add DLCs, pick only their installers.");
+        if (!installed && games == 0)
+            throw new IOException("DLCs need the game. Please pick the game's installer along with them.");
+
+        // the DLCs that will be there: those imported already, then the game's, then each DLC
+        // installer's unless all of its DLCs are there already
+        String[] importedDlcs = installed ? new File(game, "dlc").list() : null;
+        List<String> imported = importedDlcs != null ? Arrays.asList(importedDlcs) : new ArrayList<>();
+        List<String> there = new ArrayList<>(imported);
+        for (GameZip z : zips)
+            if (z.game)
+                there.addAll(z.dlcs);
+        boolean[] skip = new boolean[zips.size()];
+        List<String> skipped = new ArrayList<>();   // the names of those imported already
+        long need = 0, total = 0;
+        for (int f = 0; f < zips.size(); f++) {
+            GameZip z = zips.get(f);
+            if (!z.game && there.containsAll(z.dlcs)) {
+                skip[f] = true;
+                for (String dlc : z.dlcs)
+                    if (imported.contains(dlc) && !skipped.contains(dlcName(dlc)))
+                        skipped.add(dlcName(dlc));
+                continue;
+            }
+            there.addAll(z.dlcs);
+            need += z.bytes;
+            total += z.zipBytes;
+        }
+        String note = null;
+        if (!skipped.isEmpty())
+            note = total == 0
+                    ? names(skipped) + (skipped.size() > 1 ? " are" : " is") + " already imported, so there was nothing new to add."
+                    : names(skipped) + (skipped.size() > 1 ? " were already imported, so they were" : " was already imported, so it was") + " skipped.";
+        if (total == 0)   // every pick was skipped
+            return note;
+        long free = game.getParentFile().getUsableSpace();
+        if (free < need)
+            throw new IOException(String.format(Locale.US,
+                    "There isn't enough free space: this needs %.1f GB and %.1f GB is free.", need / 1e9, free / 1e9));
+
         String root = tmp.getCanonicalPath() + "/";
-        try (ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(installer, "r");
-             FileChannel ch = new FileInputStream(pfd.getFileDescriptor()).getChannel()) {
-            long start = zipStart(ch), size = ch.size();
-            // the Steam zip is uncompressed, so with DLCs it can hold more than GAME_BYTES
-            long need = Math.max(GAME_BYTES, size - start);
-            if (game.getParentFile().getUsableSpace() < need)
-                throw new IOException(String.format(Locale.US, "not enough free space, the game needs %.1f GB", need / 1e9));
-            String prefix = start > 0 ? INSTALLER_GAME : "";   // something in front of the zip: GOG's installer
-            ch.position(start);
-            ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Channels.newInputStream(ch), 1 << 16));
-            int shown = -1;
-            for (ZipEntry e; (e = zip.getNextEntry()) != null; ) {
-                if (!e.getName().startsWith(prefix) || e.getName().equals(prefix))
-                    continue;
-                File out = new File(tmp, e.getName().substring(prefix.length()));
-                if (!out.getCanonicalPath().startsWith(root))
-                    throw new IOException("bad file name in the installer: " + e.getName());
-                if (e.isDirectory()) {
-                    out.mkdirs();
-                    continue;
+        long done = 0;   // zip bytes of the files already unpacked
+        int shown = -1;
+        for (int f = 0; f < files.size(); f++) {
+            if (skip[f])
+                continue;
+            try (FileChannel ch = open(files.get(f))) {
+                GameZip z = zips.get(f);
+                ch.position(z.start);
+                ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Channels.newInputStream(ch), 1 << 16));
+                for (ZipEntry e; (e = zip.getNextEntry()) != null; ) {
+                    if (!e.getName().startsWith(z.prefix) || e.getName().equals(z.prefix))
+                        continue;
+                    File out = new File(tmp, e.getName().substring(z.prefix.length()));
+                    if (!out.getCanonicalPath().startsWith(root))
+                        throw new IOException("The installer looks damaged (unexpected file name: " + e.getName() + ").");
+                    if (e.isDirectory()) {
+                        out.mkdirs();
+                        continue;
+                    }
+                    out.getParentFile().mkdirs();
+                    try (OutputStream o = new FileOutputStream(out)) {
+                        copy(zip, o);
+                    }
+                    if (e.getTime() >= 0)   // mirrorGame copies the binary again only when its time changes
+                        out.setLastModified(e.getTime());
+                    int percent = (int) (100 * (done + ch.position() - z.start) / total);
+                    if (percent != shown)
+                        progress.accept(shown = percent);
                 }
-                out.getParentFile().mkdirs();
-                try (OutputStream o = new FileOutputStream(out)) {
-                    copy(zip, o);
-                }
-                if (e.getTime() >= 0)   // mirrorGame copies the binary again only when its time changes
-                    out.setLastModified(e.getTime());
-                int percent = (int) (100 * (ch.position() - start) / (size - start));
-                if (percent != shown)
-                    progress.accept(shown = percent);
+                done += z.zipBytes;
             }
         }
-        if (!new File(tmp, "_linuxnosteam/darkest.bin.x86_64").exists())
-            throw new IOException("this file doesn't hold the Linux Darkest Dungeon");
+        if (installed) {
+            moveInto(tmp, game, 1);   // dlc/ is merged, each DLC folder in it replaced
+            deleteTree(tmp);
+            return note;
+        }
         patchShaders(tmp);
         deleteTree(game);   // only an incomplete copy can be here; saves live in getFilesDir()
         if (!tmp.renameTo(game))
-            throw new IOException("cannot rename " + tmp + " to " + game);
+            throw new IOException("Couldn't move the imported files into place: " + tmp + " → " + game);
+        return note;
     }
 
-    /**
-     * Where the zip starts in the file: 0 for a plain zip, or after what is in front of it. The zip's
-     * end record counts the central directory's offset from the zip's own start, and the directory
-     * ends at the record. (A plain zip is checked first: past 4 GB it is zip64, whose end record holds
-     * 0xffffffff instead of the offset.)
-     */
-    private static long zipStart(FileChannel ch) throws IOException {
-        ByteBuffer first = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-        if (ch.read(first, 0) == 4 && first.getInt(0) == 0x04034b50)
-            return 0;
-        long size = ch.size();
-        int len = (int) Math.min(size, 22 + 65535);   // the end record plus its longest comment
-        ByteBuffer b = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
-        while (b.hasRemaining() && ch.read(b, size - len + b.position()) > 0)
-            ;
-        for (int i = len - 22; i >= 0; i--)
-            if (b.getInt(i) == 0x06054b50) {
-                long start = size - len + i - (b.getInt(i + 12) & 0xffffffffL) - (b.getInt(i + 16) & 0xffffffffL);
-                ByteBuffer sig = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
-                if (start >= 0 && ch.read(sig, start) == 4 && sig.getInt(0) == 0x04034b50)
-                    return start;
-                break;
+    /** "A", "A and B", "A, B and C". */
+    private static String names(List<String> names) {
+        int last = names.size() - 1;
+        return last == 0 ? names.get(0) : String.join(", ", names.subList(0, last)) + " and " + names.get(last);
+    }
+
+    private FileChannel open(Uri file) throws IOException {
+        return new ParcelFileDescriptor.AutoCloseInputStream(getContentResolver().openFileDescriptor(file, "r"))
+                .getChannel();
+    }
+
+    /** What a picked file holds, read from its zip's end record and central directory. */
+    private static final class GameZip {
+        long start;      // where the zip starts in the file
+        long zipBytes;   // the zip's own size, from start to the end of the file
+        String prefix;   // the game folder inside the zip
+        long bytes;      // what the files under prefix unpack to
+        boolean game;    // the game binary is under prefix
+        List<String> dlcs = new ArrayList<>();   // the DLC folders under prefix/dlc/
+
+        /**
+         * The zip starts at 0 in a plain zip, or after what is in front of it. The end record counts
+         * the central directory's offset from the zip's own start, and the directory ends at the
+         * record. Past 4 GB a zip is zip64: its end record holds 0xffffffff, and the zip64 end record
+         * (found through its locator, just before the end record) holds the real values. Only the
+         * Steam zip, a plain zip, can be that big.
+         */
+        GameZip(FileChannel ch) throws IOException {
+            long size = ch.size();
+            int len = (int) Math.min(size, 22 + 65535);   // the end record plus its longest comment
+            ByteBuffer b = read(ch, size - len, len);
+            int i = len - 22;
+            while (i >= 0 && b.getInt(i) != 0x06054b50)
+                i--;
+            if (i < 0)
+                throw new IOException(NOT_A_GAME_FILE);
+            long end = size - len + i;
+            long dirSize = b.getInt(i + 12) & 0xffffffffL, dirOffset = b.getInt(i + 16) & 0xffffffffL;
+            if (dirOffset == 0xffffffffL) {
+                ByteBuffer locator = read(ch, end - 20, 20);
+                if (locator.getInt(0) != 0x07064b50)
+                    throw new IOException(DAMAGED);
+                ByteBuffer end64 = read(ch, locator.getLong(8), 56);
+                if (end64.getInt(0) != 0x06064b50)
+                    throw new IOException(DAMAGED);
+                dirSize = end64.getLong(40);
+                dirOffset = end64.getLong(48);
+                start = 0;
+            } else
+                start = end - dirSize - dirOffset;
+            if (start < 0 || read(ch, start, 4).getInt(0) != 0x04034b50)
+                throw new IOException(NOT_A_GAME_FILE);
+            prefix = start > 0 ? INSTALLER_GAME : "";   // something in front of the zip: GOG's installer
+            zipBytes = size - start;
+
+            ByteBuffer dir = read(ch, start + dirOffset, (int) dirSize);
+            for (i = 0; i + 46 <= dir.limit() && dir.getInt(i) == 0x02014b50; ) {
+                int nameLen = dir.getShort(i + 28) & 0xffff, extraLen = dir.getShort(i + 30) & 0xffff;
+                String name = new String(dir.array(), i + 46, nameLen, StandardCharsets.ISO_8859_1);
+                long unpacked = dir.getInt(i + 24) & 0xffffffffL;
+                if (unpacked == 0xffffffffL)   // the real size leads the zip64 extra field (id 1)
+                    for (int x = i + 46 + nameLen; x + 12 <= i + 46 + nameLen + extraLen;
+                         x += 4 + (dir.getShort(x + 2) & 0xffff))
+                        if (dir.getShort(x) == 1) {
+                            unpacked = dir.getLong(x + 4);
+                            break;
+                        }
+                if (name.startsWith(prefix)) {
+                    bytes += unpacked;
+                    game |= name.equals(prefix + GAME_BINARY);
+                    String dlc = name.startsWith(prefix + "dlc/") ? name.substring(prefix.length() + 4) : "";
+                    if (dlc.indexOf('/') > 0 && !dlcs.contains(dlc = dlc.substring(0, dlc.indexOf('/'))))
+                        dlcs.add(dlc);
+                }
+                i += 46 + nameLen + extraLen + (dir.getShort(i + 32) & 0xffff);
             }
-        throw new IOException("not GOG's installer or the Steam zip (no zip inside)");
+        }
+    }
+
+    /** len bytes of the file from pos, little-endian. */
+    private static ByteBuffer read(FileChannel ch, long pos, int len) throws IOException {
+        ByteBuffer b = ByteBuffer.allocate(len).order(ByteOrder.LITTLE_ENDIAN);
+        while (b.hasRemaining() && ch.read(b, pos + b.position()) > 0)
+            ;
+        if (b.hasRemaining())
+            throw new IOException(DAMAGED);
+        return b;
+    }
+
+    /** Moves src's entries into dest, replacing what is there; folders down to `merge` levels are merged instead. */
+    private static void moveInto(File src, File dest, int merge) throws IOException {
+        dest.mkdirs();
+        for (File f : src.listFiles()) {
+            File to = new File(dest, f.getName());
+            if (merge > 0 && f.isDirectory())
+                moveInto(f, to, merge - 1);
+            else {
+                deleteTree(to);
+                if (!f.renameTo(to))
+                    throw new IOException("Couldn't move the imported files into place: " + f + " → " + to);
+            }
+        }
     }
 
     /** Runs assets/patch-shaders.sh on the game folder: the game's GLSL 1.20 shaders as GLSL ES. */
@@ -843,7 +1156,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         copy(p.getInputStream(), out);
         if (p.waitFor() != 0)
-            throw new IOException("shader patch failed: " + out.toString().trim());
+            throw new IOException("Couldn't convert the game's shaders: " + out.toString().trim());
         Log.i(TAG, out.toString().trim());
     }
 

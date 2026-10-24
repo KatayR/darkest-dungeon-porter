@@ -11,9 +11,9 @@ Runs your own GOG or Steam copy of **Darkest Dungeon®** (the Linux version) nat
 ## Requirements
 - Android 12 or newer, 64-bit ARM (arm64-v8a).
 - A GPU with OpenGL ES 2 and `GL_OES_texture_3D` (the game's colour grading needs it).
-- About 4.5 GB of free storage for the import: the installer (about 1.9 GB) or the Steam zip (about 2.1 GB, more with DLCs), plus 2.5 GB for the game (the import doesn't start with less free). Afterwards you can delete the installer or zip, and the game uses about 2.5 GB.
+- About 4.5 GB of free storage for the import: the installer (about 1.9 GB) or the Steam zip (about 2.1 GB, more with DLCs), plus 2.5 GB for the game (the import doesn't start with less free than the files unpack to). Afterwards you can delete the installer or zip, and the game uses about 2.5 GB. DLCs need more (The Color of Madness: a 0.5 GB installer, 0.65 GB in the game).
 - One of:
-  - GOG's **Linux** installer of Darkest Dungeon (`darkest_dungeon_…_linux_….sh`). Tested with build 27988.
+  - GOG's **Linux** installer of Darkest Dungeon (`darkest_dungeon_…_linux_….sh`), and optionally its DLC installers. Tested with build 27988, The Musketeer and The Color of Madness.
   - A Steam copy, packed on a Windows PC by `get-steam-game.bat` (below). Tested with build 28212.
 
 **Tested on:**
@@ -33,14 +33,17 @@ Other devices may work. Reports are welcome.
      2. Download the Linux installer of the game: https://www.gog.com/downloads/darkest_dungeon/en3installer0
         - The link only works while you are logged in to an account that owns Darkest Dungeon.
         - The file is called `darkest_dungeon_…_linux_….sh` and is about 1.9 GB.
+     3. For DLCs you own, download their Linux installers from the same page (e.g. `darkest_dungeon_the_color_of_madness_…_linux_….sh`).
    - **From Steam** (needs a Windows 10 or 11 PC with Steam):
      1. Start Steam and log in to the account that owns Darkest Dungeon.
      2. Download `get-steam-game.bat` from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases) (or [from the repo](port/steam/get-steam-game.bat)) and double-click it.
         - It asks the running Steam to download the game's Linux files (and the DLCs you own) to Steam's `steamapps\content` folder, then packs what the phone needs into `darkest-dungeon-steam.zip` next to the bat.
      3. Copy `darkest-dungeon-steam.zip` to the phone.
 3. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer or the zip.
+   - To import GOG's DLC installers at the same time, long-press to select them together with the game's installer.
+   - DLCs can also be added later: tap **Add DLC** on the launch screen and pick their installers.
    - The app unpacks only the game data and converts six shaders to OpenGL ES.
-   - You can delete the installer or zip afterwards.
+   - You can delete the installers or zip afterwards.
 4. Choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
 
 Saves are kept in the app's private storage, so uninstalling the app deletes them.

@@ -1017,3 +1017,50 @@ The phone reports this controller (`dumpsys input`) with sources `KEYBOARD | GAM
 - 60 FPS, no errors in logcat.
 - Couldn't be automated: `sendevent` into the controller's node is denied for the shell user, so the presses were done by hand.
 - [ ] Not tested: other controllers (PlayStation, generic), a USB controller, the OnePlus 5, and a battle with the controller.
+
+## GOG DLC installers (2026-10-24)
+Goal: GOG's Linux DLC installers can be imported together with the base installer (one pick), or later on top of an installed game. Tested with build 27988 of the base game, The Musketeer and The Color of Madness.
+
+**What a DLC installer holds** (listed with Python's `zipfile` on the PC):
+- The same MojoSetup shell script + zip as the base installer. In `data/noarch/game/` it holds only `dlc/<id>_<name>/` (`445700_musketeer`, 181 files, 21 MB; `735730_color_of_madness`, 1,283 files, 653 MB unpacked from 536 MB) and its own `goggame-<id>.info/.hashdb`.
+- No file in `data/noarch/game/` overlaps the base installer, and the base has no `dlc/` folder. No shaders, binaries or split files (`postinst.sh` only merges `*.split` parts, and there are none). MojoSetup's own install is a plain copy of `noarch/*`.
+- This is the layout of the Steam DLC depots, which the game already found (the "Activate DLC" dialog, see Steam copy).
+- Today the import only runs while no game is installed, and needs `_linuxnosteam/darkest.bin.x86_64` in the file, so a DLC installer fails with "this file doesn't hold the Linux Darkest Dungeon".
+
+**Plan:**
+- [x] The picker allows several files (`EXTRA_ALLOW_MULTIPLE`). All picked files unpack into `game.import/` (GOG's from `data/noarch/game/`, the Steam zip from its root), with one progress bar over all of them.
+- [x] Then:
+  - with the game binary in `game.import/` (a base was picked): patch shaders and replace `game/`, as now;
+  - without it, and `game/` installed: move what was unpacked into `game/` (a DLC folder already there is replaced), so a half-done DLC import never leaves a partial `dlc/` folder in the game;
+  - without it, and no game: the error as now, naming the base installer.
+- [x] The launch screen gets an "Add DLC" button next to Play that opens the same picker.
+- [x] Free space: ~~the base needs `GAME_BYTES` as now; a DLC needs its unpacked size~~ every picked file needs its exact unpacked size, read from its zip's central directory (decided at check-in; see the changes).
+- [x] The mirror needs no change: `dlc/` is one symlink to `game/dlc`, so later DLCs show through it.
+- [x] README: the GOG route and the import screen mention the DLC installers.
+- [x] **Verify on the A34** (debug build): base + both DLCs in one pick; then base alone, then each DLC through "Add DLC". The DLC folders are in `game/`, and the game offers both DLCs (the new campaign's DLC options or the "Activate DLC" dialog; manual by hand).
+
+**Changes against the plan:**
+- `GAME_BYTES` (a fixed 2.5 GB) is gone. `GameZip` reads each picked file's end record and central directory once: where the zip starts, what the files under the game folder unpack to, and whether they hold the game binary or a `dlc/` folder. The guess was already short for the Steam zip, which `tar` deflates (2.91 GB unpacked, see Steam copy); its old comment still called it uncompressed.
+- `GameZip` also reads zip64: past 4 GB, the end record holds 0xffffffff and the zip64 end record (through its locator) has the directory; an entry over 4 GB has its size in the zip64 extra field. Only a Steam zip with many DLCs can get there.
+- The files are checked before anything unpacks: one copy of the game at most, a game only while none is installed, a DLC only with a game, and nothing that is neither.
+- A failed import goes back to the launch screen (or the import screen while no game is installed), with the error.
+
+**Review:**
+- **On the PC** (`GameZip` copied into a test class, run with the JBR): the unpacked sizes equal Python's `zipfile` sums: base 2,347,414,674 bytes, The Color of Madness 651,786,565 (536 MB installer), Steam zip 2,912,192,153 (game and DLC). A 4.36 GB zip64 test zip (one stored 4.36 GB entry, so the zip64 end record and size extra field are both used) read right too. Random bytes and a text file are rejected ("no zip inside").
+- **On the Galaxy A34** (debug build, picks done by hand):
+  - base + both DLCs in one pick: `game/dlc/` holds `445700_musketeer` (149 files) and `735730_color_of_madness` (1,040), both as many as in the installers. The new campaign offers both DLCs.
+  - after wiping `game/`: the base alone, then Add DLC with The Color of Madness, then with The Musketeer (so the second merges into an existing `dlc/`). Same file counts, `game.import/` cleaned up, and both DLCs offered in a new campaign.
+  - the guards: the base through Add DLC gives "the game is installed already: pick only DLC installers"; a DLC on the import screen alone gives "pick GOG's installer of the game or the Steam zip too".
+- [ ] Not tested: playing with the DLCs beyond the new-campaign dialog, the other GOG DLCs (Crimson Court, Shieldbreaker, The Butcher's Circus), GOG DLCs on top of the Steam game (build 28212 against GOG's 27988), and a DLC imported again over itself.
+
+### Launch screen redesign (2026-10-24)
+Asked for: the first screen in two halves (resolution and frame rate on the left, importing on the right, with what is already imported under the import button), Play at the bottom centre, easier-to-read type and colours, and friendlier messages. The texts were agreed before writing.
+- [x] One screen for both states: two rounded cards ("Settings", "Game files") on a dark background, left-aligned text, a heading over grey labels and white values; Play (amber) at the bottom centre. Before the game is imported, Play is grey and disabled (a line under it saying so was dropped on request), and the button reads "Import game" instead of "Add DLC".
+- [x] "Imported" lists the game (GOG when `goggame-1450711444.info` is there, else Steam) and each `dlc/` folder by name. The folders hold no name of their own, so `dlcName` knows the six DLC keys and capitalises any other.
+- [x] Messages are sentences shown as "Couldn't import: …" in the right card. Free space says how much is needed and how much is free.
+- [x] The right card scrolls when its content is taller, so the long hint and many DLCs never push Play off the screen.
+- **Review (Galaxy A34, screenshots):** both states (game folder moved aside for the no-game one) fit at 2340×1080 without scrolling. Not checked on the phone yet: opening the dropdowns, Play starting the game, an error message in place and the import progress screen (restyled the same way).
+- [x] Follow-up: the hint before the game is imported is a short list ("Pick one of these:", GOG's Linux installer and the Steam zip as bullets with their file names in monospace, then "For GOG, DLC installers can be picked together with the game. The Steam zip already has your DLCs."). "Nothing yet." is 14 sp italic, and the DLC lines are italic. To keep everything on screen, the import button moved into the "Game files" header row and the cards split 2:3 in its favour.
+- [x] Follow-up: no "Imported" section before the game is imported (so no "Nothing yet."). The import button sits at the bottom right of the card: under the hint before the game is imported, and under the imported list and "Pick one or more of GOG's DLC installers." after. "Import the game first, then you can play." under Play was removed. The DLC error no longer mentions the Steam zip, and the import message is centred.
+- [x] Follow-up: import errors open a dialog ("Couldn't import", the message, OK) instead of a red line in the card, which pushed the button out of view.
+- [x] Reported: the same DLC could be imported again and again (it silently replaced the copy). Then asked: picking A, B and C with A imported should still import B and C. `GameZip` now lists the DLC folders each file holds. Before unpacking, a DLC installer is skipped when all its DLCs are imported already or come in another picked file (the game's zip counts first, then the picks in order). The rest is imported, and a dialog ("Already imported") names the skipped ones that were imported already: "The Musketeer was already imported, so it was skipped.", or "... is already imported, so there was nothing new to add." when nothing was left. A DLC that only came twice in one pick (the Steam zip and a GOG installer) is skipped without a note. Checked on the PC: the base installer holds no DLC folder, each DLC installer one.
