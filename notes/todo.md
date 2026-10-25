@@ -1065,3 +1065,37 @@ Asked for: the first screen in two halves (resolution and frame rate on the left
 - [x] Follow-up: import errors open a dialog ("Couldn't import", the message, OK) instead of a red line in the card, which pushed the button out of view.
 - [x] Reported: the same DLC could be imported again and again (it silently replaced the copy). Then asked: picking A, B and C with A imported should still import B and C. `GameZip` now lists the DLC folders each file holds. Before unpacking, a DLC installer is skipped when all its DLCs are imported already or come in another picked file (the game's zip counts first, then the picks in order). The rest is imported, and a dialog ("Already imported") names the skipped ones that were imported already: "The Musketeer was already imported, so it was skipped.", or "... is already imported, so there was nothing new to add." when nothing was left. A DLC that only came twice in one pick (the Steam zip and a GOG installer) is skipped without a note. Checked on the PC: the base installer holds no DLC folder, each DLC installer one.
 - [x] Release 0.4.4 (versionCode 8), signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat`.
+
+## Shift button in the trinket inventory (2026-10-25)
+Asked for: the game sells trinkets on Shift-click, which touch can't do. Detect the trinket inventory and show a Shift button over it. Only the trinket inventory for now, to test.
+
+**What the game does** (static disassembly of both `darkest.bin.x86_64` builds, `llvm-objdump -d -C`):
+- No SDL keyboard-state imports (`SDL_GetModState`, `SDL_GetKeyboardState`). `TrackKeyEvent` keeps the game's own key table by `keysym.scancode` (up to 0xFF); `keysym.mod` is never read. So a `DD_KEY` of scancode 225 (Left Shift) going down holds Shift, and going up releases it. The key path needs nothing new.
+- `TownUI::Panel::RealmInventory::PreChildrenShowInternal` asks `Input_IsAnyKeyDown({SDLK_LSHIFT, SDLK_RSHIFT})` every frame it draws. While that is true (and a flag in `App` is off), the grid is in sell mode, and a click asks "Really sell X for N gold?" (Yes / No / Always).
+- Shift matters elsewhere too (the game's help texts, and the code that references `SDLK_LSHIFT`/`RSHIFT`): Shift-click discards an item in the dungeon inventory (`Inventory::Display::InventoryButtonInGrid`), sends a hero out of an Abbey/Tavern/Sanitarium slot early (`HeroSlot`, `ItemContainerDisplay`), and lowers the torch, with Ctrl snuffing it (`LightTorchOverlay`). Not part of this step.
+- **Is the trinket inventory open:** `TownDisplay::GetIsRealmInventoryVisible()` reads `TownDisplay::s_Instance` (a pointer: NULL outside the hamlet, set by `TownDisplay::Create`, cleared by `Destroy`), then the panel at +0x2f70: `UI::Panel::Base::GetIsActive()` is the int at +0x38 being non-zero. Its states: 0 closed, 1–4 opening or open (4 = `IsFullyActive`), 5–7 closing (`GetIsExiting`).
+- The GOG 27988 and Steam 28212 binaries differ. `s_Instance` is at 0x38410a0 (GOG) and 0x3841090 (Steam), but both have `add $0x2f70,%rdi` (`48 81 c7 70 2f 00 00`) at `GetIsRealmInventoryVisible`+8 and `cmpl $0,0x38(%rdi)` (`83 7f 38 00`) at `GetIsActive`.
+
+**Plan:**
+- [x] `ddproto.h`: `DD_SHIFT_SCREEN` (game → app, a=1 the trinket inventory is open / 0 it isn't).
+- [x] ddglue:
+  - At the first swap, map `$DD_BASE_PATH/darkest.bin.x86_64` and find in `.symtab`: `_ZN6TownUI6Screen11TownDisplay10s_InstanceE`, `_ZNK6TownUI6Screen11TownDisplay26GetIsRealmInventoryVisibleEb`, `_ZNK2UI5Panel4Base11GetIsActiveEv`. Check the two instructions above in the file's `.text`. If a symbol is missing or the bytes differ, log why and never send `DD_SHIFT_SCREEN`, so the button never shows on an unknown build.
+  - At each swap (the game's thread, between its frames): open = `s_Instance` is set and the panel state at +0x2f70+0x38 is 1–4. Send `DD_SHIFT_SCREEN` when that changes, and log it.
+- [x] ddview: `DD_SHIFT_SCREEN` calls `DDActivity.onShiftScreen(boolean)` from the render thread, attached to the VM like `onTextInput` (one shared helper).
+- [x] DDActivity:
+  - The game view and a Shift button share a `FrameLayout`. The button keeps its own touches (no cursor move, no click), and the keyboard pan still moves only the game view.
+  - A toggle: a tap holds Shift (`nativeKey(225, true)`, button amber), the next releases it (grey). Hidden unless the trinket inventory is open.
+  - Shift is released whenever the button hides and when the surface goes away (app in the background), so it can never stay held into a dungeon, where Shift-click discards items.
+  - Placement: the left edge, halfway down. Check on screen that it covers nothing in the trinket inventory.
+- [x] README Controls: one line on the button.
+- [x] Verify:
+  - On the PC: the lookup finds the three symbols and both instructions in both binaries (Python, the same steps as the C code).
+  - On the A34 (debug build; GOG 27988 with The Musketeer and The Color of Madness is installed): `logcat -s ddglue` shows the lookup, then "trinket inventory open/closed" as the panel opens and closes (by hand); the button shows only then; Shift on + tap on a trinket opens the sell dialog; closing the panel with Shift on releases it. A screenshot shows what the button covers.
+- **Not doing:** the other Shift uses; a hardware keyboard's Shift (goes through the existing key path, untested).
+
+**Review (Galaxy A34, debug build):**
+- **GOG 27988** (with The Musketeer and The Color of Madness): the glue found `s_Instance` at 0x38410a0 at the first frame. Opening the trinket inventory logged "open" and showed the button; with Shift on, the panel switched to sell mode ("Sell trinket for: 750"). Closing it logged "closed", the button went away, and the gold was unchanged.
+- **Steam 28212** (imported from the zip, with the GOG game moved aside to `files/game.gog`): `s_Instance` at 0x3841090; the same open/closed, button and sell mode, and a Stun Stone sold for 750 gold (3,395 to 4,145).
+- On the PC, a Python copy of the lookup found the three symbols and both instructions in both binaries.
+- The button covers only town scenery at the left, not the panel, the roster or the bottom bar (screenshots).
+- [ ] Not tested: going to the background with Shift on; the trinket panel opened from a hero's screen or the embark screen; a hardware keyboard's Shift.

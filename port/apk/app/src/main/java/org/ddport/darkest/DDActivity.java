@@ -35,6 +35,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -81,7 +82,8 @@ import java.util.zip.ZipInputStream;
  *
  * Touch works like a laptop trackpad: one finger moves the cursor, a tap clicks, a two-finger tap
  * right-clicks, tap then hold drags. Back sends Escape. While the game wants text, the keyboard is up
- * and types into it; hardware keyboards always reach the game.
+ * and types into it; hardware keyboards always reach the game. While the trinket inventory is open, a
+ * Shift button holds Shift, which makes a click sell the trinket.
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "DDActivity";
@@ -122,6 +124,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private GameView view;
     private boolean textInput;  // the game wants text: the keyboard is up
     private float lastClickY, lowestClickY;   // when the game asked for text, 0 (top) to 1 (see panAboveKeyboard)
+    private Button shiftButton; // over the game while the trinket inventory is open (see onShiftScreen)
+    private boolean shiftHeld;  // the Shift button holds Shift down in the game
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -421,7 +425,10 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         view.getHolder().setFixedSize(gameW, gameH);
         view.getHolder().addCallback(this);
         view.setOnTouchListener((v, e) -> onTouch(e));
-        setContentView(view);
+        FrameLayout layout = new FrameLayout(this);
+        layout.addView(view);
+        layout.addView(shiftButton());   // over the game, not moved by panAboveKeyboard
+        setContentView(layout);
         // the keyboard (and the bars that may show with it) cover the game rather than resizing it;
         // panAboveKeyboard moves it instead
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
@@ -514,6 +521,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     @Override
     public void surfaceDestroyed(SurfaceHolder holder) {
         nativeSetSurface(null);
+        holdShift(false);   // nothing stays held while the game is away
     }
 
     // ---- input ----
@@ -713,6 +721,49 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         float lastAtTop = (lastClickY - FIELD_MARGIN) * h;                       // most pan that shows the last
         float pan = Math.max(0, Math.min(lowestAbove, lastAtTop));
         view.setTranslationY(textInput && keyboard > 0 ? -pan : 0);
+    }
+
+    /**
+     * The Shift button: in the trinket inventory, the game sells the trinket clicked while Shift is
+     * held. A tap holds Shift, the next releases it. It keeps its own touches (they don't move the
+     * cursor or click) and never takes focus from the game view, which the keyboard types into.
+     */
+    private Button shiftButton() {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        shiftButton = button(c, "⇧ Shift", BUTTON, TEXT);
+        shiftButton.setMinWidth(dp(c, 96));
+        shiftButton.setAlpha(0.85f);
+        shiftButton.setFocusable(false);
+        shiftButton.setVisibility(View.GONE);
+        shiftButton.setOnClickListener(b -> holdShift(!shiftHeld));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL);
+        lp.leftMargin = dp(c, 16);
+        shiftButton.setLayoutParams(lp);
+        return shiftButton;
+    }
+
+    /** Holds Shift down in the game (the button turns amber) or releases it. */
+    private void holdShift(boolean held) {
+        if (held == shiftHeld)
+            return;
+        shiftHeld = held;
+        nativeKey(scancode(KeyEvent.KEYCODE_SHIFT_LEFT), held);
+        shiftButton.setBackgroundTintList(ColorStateList.valueOf(held ? ACCENT : BUTTON));
+        shiftButton.setTextColor(held ? ON_ACCENT : TEXT);
+    }
+
+    /**
+     * Called by ddview (on its render thread) when the trinket inventory opens or closes. Shift is
+     * released with it, so it never stays held where Shift-click does something else (in a dungeon,
+     * it discards an item).
+     */
+    private void onShiftScreen(boolean open) {
+        handler.post(() -> {
+            if (!open)
+                holdShift(false);
+            shiftButton.setVisibility(open ? View.VISIBLE : View.GONE);
+        });
     }
 
     /** The game's view, and the text field the on-screen keyboard types into. */

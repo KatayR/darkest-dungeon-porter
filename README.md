@@ -55,6 +55,7 @@ The touch screen works like a laptop trackpad:
 - **Two-finger tap** to right-click.
 - **Tap, then touch again and hold** to drag.
 - **Back** opens the game's Escape menu.
+- **Shift** (selling trinkets): while the trinket inventory is open, a Shift button shows at the left edge. Tap it to hold Shift (it turns amber), then tap a trinket to sell it. Shift is let go when the inventory closes.
 
 A **game controller** (Bluetooth or USB) works as on PC, with the game's own button prompts. It can be connected or disconnected at any time. Rumble isn't supported. Tested with an Xbox Wireless Controller.
 

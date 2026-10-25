@@ -2,7 +2,8 @@
 // gets the game's frame buffers as AHardwareBuffers, and draws each presented frame (plus the
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
 // Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
-// positions to the game. Tells the activity when the game wants text (it shows the keyboard).
+// positions to the game. Tells the activity when the game wants text (it shows the keyboard) and
+// when the trinket inventory opens or closes (it shows the Shift button).
 // Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
 // here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
@@ -48,10 +49,11 @@ static float cursor_x, cursor_y;
 static int cursor_visible = 1, cursor_w, cursor_h, cursor_hx, cursor_hy, cursor_dirty;
 static unsigned char *cursor_pixels;
 
-// the activity, told when the game wants text (DD_TEXT_INPUT)
+// the activity, told when the game wants text (DD_TEXT_INPUT) and when the Shift button shows
+// (DD_SHIFT_SCREEN)
 static JavaVM *vm;
 static jobject activity;
-static jmethodID on_text_input;
+static jmethodID on_text_input, on_shift_screen;
 
 // recent left clicks (cursor height and time), to tell the activity where the text field may be
 #define CLICKS    16
@@ -250,16 +252,23 @@ static void present(int i) {
     }
 }
 
-// DDActivity.onTextInput(on, last click, lowest recent click), heights 0..1, from the render thread
-// (attached to the VM on first use). The game doesn't say where its text field is; the player has
-// clicked it just now, or a little earlier (a save slot, then the dialog that follows).
-static void text_input(int on) {
+// the render thread's JNI environment (attached to the VM on first use), or NULL
+static JNIEnv *java_env(void) {
     static JNIEnv *env;
     if (!env && (*vm)->AttachCurrentThread(vm, &env, NULL) != JNI_OK) {
         env = NULL;
         LOG("cannot attach to the Java VM");
-        return;
     }
+    return env;
+}
+
+// DDActivity.onTextInput(on, last click, lowest recent click), heights 0..1, from the render thread.
+// The game doesn't say where its text field is; the player has clicked it just now, or a little
+// earlier (a save slot, then the dialog that follows).
+static void text_input(int on) {
+    JNIEnv *env = java_env();
+    if (!env)
+        return;
     float last = cursor_y, lowest = cursor_y;   // no recent click: where the cursor is
     double now = now_ms();
     pthread_mutex_lock(&lock);
@@ -272,6 +281,13 @@ static void text_input(int on) {
     pthread_mutex_unlock(&lock);
     (*env)->CallVoidMethod(env, activity, on_text_input, (jboolean)on, (jfloat)(last / game_h),
                            (jfloat)(lowest / game_h));
+}
+
+// DDActivity.onShiftScreen(on), from the render thread
+static void shift_screen(int on) {
+    JNIEnv *env = java_env();
+    if (env)
+        (*env)->CallVoidMethod(env, activity, on_shift_screen, (jboolean)on);
 }
 
 static void handle(int fd) {
@@ -331,6 +347,9 @@ static void handle(int fd) {
         break;
     case DD_TEXT_INPUT:
         text_input(m.a != 0);
+        break;
+    case DD_SHIFT_SCREEN:
+        shift_screen(m.a != 0);
         break;
     }
 }
@@ -421,6 +440,7 @@ Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jobject 
     (*env)->GetJavaVM(env, &vm);
     activity = (*env)->NewGlobalRef(env, act);
     on_text_input = (*env)->GetMethodID(env, cls, "onTextInput", "(ZFF)V");
+    on_shift_screen = (*env)->GetMethodID(env, cls, "onShiftScreen", "(Z)V");
     game_w = w;
     game_h = h;
     refreshes = frame_refreshes > 1 ? frame_refreshes : 1;

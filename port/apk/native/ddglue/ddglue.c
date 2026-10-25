@@ -18,6 +18,8 @@
 //   becomes SDL_TEXTINPUT plus a press of TEXT_KEY: the game's text fields insert the last text
 //   received only when a printable key goes down, one character per frame.
 // - Cursor: the game's colour cursors go to the app, which draws them over the frame.
+// - Shift screen: the app shows a Shift button while the trinket inventory is open (Shift-click sells
+//   there); the panel's state is read from the game's memory (see "the trinket inventory" below).
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
 // Protocol: ../common/ddproto.h.
@@ -29,11 +31,14 @@
 #include <android/hardware_buffer.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#include <elf.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -209,6 +214,96 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
     if (h) *h = height;
 }
 
+// ---- the trinket inventory (Shift button) ----
+// The game sells a trinket on Shift-click while its trinket inventory is open, which touch can't do,
+// so the app shows a Shift button then. The game binary sits at its fixed addresses in this process
+// and keeps its symbols, so the panel's state is read the way the game's own
+// TownDisplay::GetIsRealmInventoryVisible reads it: TownDisplay::s_Instance (NULL outside the hamlet),
+// the panel at +0x2f70, and its state (UI::Panel::Base::GetIsActive: the int at +0x38): 0 closed,
+// 1-4 opening or open, 5-7 closing. Both offsets are checked in the game's code first (the same in
+// GOG 27988 and Steam 28212); a build where they differ never gets the button.
+#define TRINKETS_PANEL 0x2f70
+#define PANEL_STATE    0x38
+static char **town_display;   // &TownDisplay::s_Instance; NULL: no button
+
+// finds TownDisplay::s_Instance in the game binary's symbols and checks the offsets above
+static void find_trinket_panel(void) {
+    const char *base = getenv("DD_BASE_PATH");
+    char path[1024];
+    snprintf(path, sizeof path, "%sdarkest.bin.x86_64", base ? base : "./");
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    struct stat st;
+    if (fd < 0 || fstat(fd, &st) != 0) {
+        LOG("no Shift button: cannot open %s: %s", path, strerror(errno));
+        if (fd >= 0)
+            close(fd);
+        return;
+    }
+    const unsigned char *f = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (f == MAP_FAILED) {
+        LOG("no Shift button: cannot map %s: %s", path, strerror(errno));
+        return;
+    }
+    // box64 runs this very file, so it is a valid ELF
+    const Elf64_Ehdr *eh = (const Elf64_Ehdr *)f;
+    const Elf64_Shdr *sh = (const Elf64_Shdr *)(f + eh->e_shoff);
+    const char *section_names = (const char *)f + sh[eh->e_shstrndx].sh_offset;
+    const Elf64_Shdr *symtab = NULL, *text = NULL;
+    for (int i = 0; i < eh->e_shnum; i++)
+        if (sh[i].sh_type == SHT_SYMTAB)
+            symtab = &sh[i];
+        else if (!strcmp(section_names + sh[i].sh_name, ".text"))
+            text = &sh[i];
+    Elf64_Addr instance = 0, visible = 0, active = 0;
+    if (symtab && text) {
+        const Elf64_Sym *sym = (const Elf64_Sym *)(f + symtab->sh_offset);
+        const char *names = (const char *)f + sh[symtab->sh_link].sh_offset;
+        for (size_t i = 0; i < symtab->sh_size / sizeof *sym; i++) {
+            const char *s = names + sym[i].st_name;
+            if (!strcmp(s, "_ZN6TownUI6Screen11TownDisplay10s_InstanceE"))
+                instance = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK6TownUI6Screen11TownDisplay26GetIsRealmInventoryVisibleEb"))
+                visible = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK2UI5Panel4Base11GetIsActiveEv"))
+                active = sym[i].st_value;
+        }
+    }
+    static const unsigned char add_panel[] = { 0x48, 0x81, 0xc7, 0x70, 0x2f, 0x00, 0x00 };   // add $0x2f70,%rdi
+    static const unsigned char cmp_state[] = { 0x83, 0x7f, 0x38, 0x00 };                     // cmpl $0,0x38(%rdi)
+#define CODE_IS(addr, bytes) ((addr) >= text->sh_addr && (addr) + sizeof bytes <= text->sh_addr + text->sh_size \
+                              && !memcmp(f + text->sh_offset + ((addr) - text->sh_addr), bytes, sizeof bytes))
+    if (!instance || !visible || !active)
+        LOG("no Shift button: the game binary lacks the trinket inventory's symbols");
+    else if (!CODE_IS(visible + 8, add_panel) || !CODE_IS(active, cmp_state))
+        LOG("no Shift button: this game build keeps the trinket inventory elsewhere");
+    else {
+        town_display = (char **)instance;
+        LOG("trinket inventory: TownDisplay::s_Instance at 0x%llx", (unsigned long long)instance);
+    }
+#undef CODE_IS
+    munmap((void *)f, st.st_size);
+}
+
+// tells the app when the trinket inventory opens or closes; at each swap, on the game's thread
+static void check_trinket_panel(void) {
+    static int looked, open;
+    if (!looked) {
+        looked = 1;
+        find_trinket_panel();
+    }
+    if (!town_display)
+        return;
+    char *town = *town_display;
+    int state = town ? *(int *)(town + TRINKETS_PANEL + PANEL_STATE) : 0;
+    int now = state >= 1 && state <= 4;
+    if (now != open) {
+        open = now;
+        LOG("trinket inventory %s", open ? "open" : "closed");
+        send_msg(DD_SHIFT_SCREEN, open, 0, 0, 0);
+    }
+}
+
 // ---- GL ----
 static EGLDisplay dpy = EGL_NO_DISPLAY;
 static EGLContext ctx = EGL_NO_CONTEXT;
@@ -360,6 +455,7 @@ int SDL_GL_GetSwapInterval(void) {
 
 void SDL_GL_SwapWindow(SDL_Window *window) {
     (void)window;
+    check_trinket_panel();
     gl4es_pre_swap();
     // a free buffer, and the previous frame on screen (the app then holds only that one)
     int i = 0, need = DD_BUFFERS - 1;
