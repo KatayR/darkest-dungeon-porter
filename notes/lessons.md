@@ -2,6 +2,9 @@
 
 Project rules learned from mistakes made during the port.
 
+## Git
+- Every commit here is by `KatayR <rasitarslan@outlook.com>`. The repo sets it in `.git/config` too, so a different global identity can't leak in. Check `git log -1 --format='%an <%ae>'` before pushing; a commit once went out under the global identity.
+
 ## Verifying input
 - When a phone test needs a long trackpad walk through menus (blind swipes, screenshots, re-aiming), ask the owner to do those steps by hand rather than driving them over adb. Typing and clicking through the game by adb took many slow rounds that a person does in seconds; keep adb for logs, screenshots and short exact checks.
 - A screenshot of the game running does not prove input works. Before calling controls done, test an *instant* click (e.g. `xdotool click 1`) and confirm the game reacts, since real taps on a touch layer are often zero-length.
@@ -63,7 +66,9 @@ Project rules learned from mistakes made during the port.
 - Read the game log with `run-as org.ddport.darkest cat files/dd.log` (debug builds only; release builds are not debuggable, so `run-as` refuses them).
 
 ## Windows scripts (port/steam)
-- `get-steam-game.bat` is plain batch, with no PowerShell. A `.bat` that runs PowerShell with `-ExecutionPolicy Bypass` and `iex` is a classic malware-loader pattern that antiviruses flag, and Windows has every needed tool built in: reg, tasklist, findstr, choice and tar.
+- `get-steam-game.bat` is plain batch, with no PowerShell, so that antiviruses don't mistake a harmless script for malware.
+  - The first version was a `.bat` that started PowerShell with `-ExecutionPolicy Bypass` and ran its own script text through `iex`. That is the usual way to give people a PowerShell script they can just double-click, since Windows doesn't run `.ps1` files by default. But malware loaders use the same wrapper, so antivirus heuristics often flag it by that shape alone, whatever the script actually does. A flagged download looks dangerous, and the people it's meant for can't easily tell that it's a false positive.
+  - Plain batch needs nothing beyond what Windows ships (reg, tasklist, findstr, choice and tar), needs no execution-policy override, and at ~120 lines is short enough to read through before running it.
 - Call `find` and `tar` by full path (`%SystemRoot%\System32\...`). Run from Git Bash, or on a PC whose PATH puts Git, Cygwin or MSYS first, a bare `find` is the Unix one; the Steam check then fails ("find: 'REG_SZ': No such file").
 - Inside a `( )` block, a `%path%` that holds `Program Files (x86)` ends the block at its `)`. Write such lines unblocked, e.g. `>> file echo(%PATH_VAR%`.
 - Windows `tar` (bsdtar) writes zip entries with data descriptors (flag 8). Java's `ZipInputStream` rejects STORED entries that have one, so `zip:compression=store` can't be imported; deflate entries are fine. Use `zip:compression-level=1`: 49 s and 2.38 GB for the whole Steam game with two DLCs, against 55 s at the default level. Check any new zip writer with `ZipInputStream` on the PC.

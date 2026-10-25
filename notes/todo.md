@@ -891,7 +891,7 @@ Steam's Linux depots ship the same DRM-free `_linuxnosteam` build as GOG (Build 
   - The download lands in `<Steam>\steamapps\content\app_262060\depot_<id>`.
   - `<Steam>\logs\console_log.txt` gets `Depot download complete : "<path>" …` or `Depot download failed : <reason>`.
 - [x] `port/steam/get-steam-game.bat`: downloads the depots through the running Steam, then writes `darkest-dungeon-steam.zip` (the game at its root).
-  - Plain batch, using reg, tasklist, findstr, choice and `tar`. A first version in PowerShell (`iex` with `-ExecutionPolicy Bypass`) was dropped, because antiviruses flag that pattern.
+  - Plain batch, using reg, tasklist, findstr, choice and `tar`. A first version in PowerShell (`iex` with `-ExecutionPolicy Bypass`) was dropped: malware uses the same wrapper, so antiviruses can flag the harmless script as a false positive.
   - `tar` deflates at level 1, because its stored entries carry data descriptors, which `ZipInputStream` rejects.
   - Unowned DLC depots fail with `missing license for depot (No subscription)` and are skipped.
   - 1117862 is The Butcher's Circus (`dlc/1117860_arena_mp`).
