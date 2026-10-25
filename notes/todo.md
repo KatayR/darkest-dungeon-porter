@@ -1099,3 +1099,4 @@ Asked for: the game sells trinkets on Shift-click, which touch can't do. Detect 
 - On the PC, a Python copy of the lookup found the three symbols and both instructions in both binaries.
 - The button covers only town scenery at the left, not the panel, the roster or the bottom bar (screenshots).
 - [ ] Not tested: going to the background with Shift on; the trinket panel opened from a hero's screen or the embark screen; a hardware keyboard's Shift.
+- [x] Release 0.4.5 (versionCode 9), signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat`.
