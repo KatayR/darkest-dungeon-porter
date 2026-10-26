@@ -46,7 +46,17 @@ Other devices may work. Reports are welcome.
    - You can delete the installers or zip afterwards.
 4. Choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
 
-Saves are kept in the app's private storage, so uninstalling the app deletes them.
+## Saves
+Saves are kept in the app's private storage, so uninstalling the app deletes them. The **Save file** card on the launch screen copies them out and back in:
+- **Export** writes them to a zip, wherever you pick (e.g. `Download/`). Keep it before uninstalling the app, or use it to move your saves to another phone.
+- **Import** replaces the saves on the phone with the ones in a zip.
+  - The save folder (the one holding `profile_0`, `profile_1`, …) can be anywhere inside the zip.
+  - The phone's own game options (`persist.options.json`) are kept. A PC's are left out, since the app sets the resolution itself.
+- **Saves from a Windows PC:**
+  - GOG: download `get-saves.bat` from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases) (or [from the repo](port/saves/get-saves.bat)) and double-click it. It packs `Documents\Darkest` into `darkest-dungeon-saves.zip` next to the bat.
+  - Steam: drop the folder `Steam\userdata\<number>\262060\remote` onto `get-saves.bat`, or zip it yourself.
+  - Copy the zip to the phone, then tap **Import** and pick it.
+- Saves move between the Steam and GOG builds as they are: Windows Steam saves loaded on the phone with both.
 
 ## Controls
 The touch screen works like a laptop trackpad:

@@ -877,8 +877,52 @@ Goal: any phone needs only the APK and GOG's Linux installer (`darkest_dungeon_2
 - [ ] Not measured: the OnePlus 5 at 1440p and 4K, battles at these sizes, and longer sessions (4K/60 runs the A34's GPU near its top clock).
 - Battle at 1080p on the OnePlus 5 (2026-10-23, about 3 minutes): walking holds 60, but battles run mostly 49–58 FPS, with dips about every 5 s and three one-second drops to ~30. During the dips the GPU runs at 515–710 MHz and is 94–98% busy. Not investigated yet.
 
-## Next: import and export saves
-- [ ] Copy the game's saves (`files/.local/share/Red Hook Studios/Darkest`) out of and into the app through the system file picker, so they survive an uninstall and can move between devices.
+## Import and export saves (2026-10-25)
+Goal: copy the game's saves (`files/.local/share/Red Hook Studios/Darkest`) out of and into the app through the system file picker, so they survive an uninstall and can move between devices. Background, the hand test and the open questions are in the handover (`saaaavveee/dd-save-import-export-handover.md`, not in the repo): Windows Steam saves loaded unchanged on both phone builds, so the feature only copies files, byte for byte.
+
+**Decided at check-in:**
+- Import replaces the whole `Darkest/` folder (no per-profile merge).
+- The zip's `persist.options.json` (a PC resolution and fullscreen) is never imported; the phone's own copy is kept.
+- Import takes a zip only, with the save folder (the one holding `profile_<n>/`) at any depth in it. A new Windows bat zips `Documents\Darkest`; a hint dialog on Import says how to get the zip.
+
+**Plan:**
+- [x] Launch screen: a "Save file" card under the Settings card, with Import and Export side by side. The left column scrolls if the two cards are taller than the screen.
+- [x] Export: `ACTION_CREATE_DOCUMENT` (`application/zip`, suggested `darkest-dungeon-saves-<date>.zip`); zips the contents of `Darkest/` (entries `global.json`, `profile_0/…` at the root). Disabled (grey, like Play) while there are no saves. A failed export deletes the half-written file.
+- [x] Import: the hint dialog (where the zip comes from; "this replaces the saves on this phone" when there are some), then `ACTION_OPEN_DOCUMENT`.
+  - A file over 100 MB is refused before reading (saves are about 2 MB; this stops a game zip picked by mistake from being read through).
+  - First pass over the entry names: the save root is the shallowest folder holding a `profile_<n>/` folder. None: "not a zip of saves". Two different ones at the same depth: refused.
+  - Second pass unpacks only what is under the root into `Darkest.import/` (zip-slip check as in `unpackGame`), without `persist.options.json`; the phone's copy is put in instead.
+  - Swap: `Darkest/` → `Darkest.before-import/`, `Darkest.import/` → `Darkest/`, then delete `Darkest.before-import/`.
+  - `recoverSaves` at start: `Darkest.before-import/` with no `Darkest/` (killed between the renames) is renamed back; with `Darkest/` there (killed while deleting), it's deleted. A leftover `Darkest.import/` is deleted by the next import.
+- [x] A shared progress screen for the game import and the save import/export, so Play can't start mid-copy.
+- [x] `port/saves/get-saves.bat`: plain batch, zips `%USERPROFILE%\Documents\Darkest` into `darkest-dungeon-saves.zip` next to the bat (deflate level 1, see lessons on bsdtar zips).
+- [x] README: the save section.
+
+**Changes against the plan:**
+- `get-saves.bat` also takes a save folder dropped onto it, for Steam's `userdata\<number>\262060\remote`, which it can't find by itself. It finds Documents through `Shell Folders\Personal`, since Documents can be moved to OneDrive.
+- No separate confirmation dialog: the Import hint says "This replaces the saves on this phone. Export them first to keep a copy." when there are saves, and its "Pick zip" button is the go-ahead.
+- `persist.options.json` from the zip is never taken, even when the phone has none (then the game writes its defaults).
+
+**Review (PC only so far):**
+- The debug APK builds.
+- **The bat** (Windows 11, run from Git Bash): the default path found this PC's `Documents\Darkest` and zipped it. With the Steam saves dropped from a folder path that has spaces and `(x86)`, it wrote `dd save/…`, 47 entries. A folder without saves gives "There are no saves (profile_0, profile_1 and so on) in …".
+- **The Java logic** (`recoverSaves`, `exportSaves`, `unpackSaves`, `entryName`, `saveRoot`, `names`, `deleteTree` and `copy`, copied into a test class with the JBR; only `Uri` became `File`, and the zip-slip base uses `File.separator` because canonical paths have `\` on Windows):
+  - the bat's zip (saves under `dd save/`): the same 43 files with the same bytes as the Windows Steam saves, and no `Darkest.import/` or `Darkest.before-import/` left;
+  - export: `ZipInputStream` reads it back with the same files and bytes, at the zip's root. Importing it over other saves replaces the whole folder (an extra `profile_5` is gone) and keeps the phone's `persist.options.json`;
+  - refused, with the saves unchanged and nothing left over: random bytes, a text file, an empty zip, a zip without `profile_<n>/`, a `../` name (nothing written outside), two save folders at the same depth (a/ and b/), and a file over 100 MB;
+  - `.\Saves\profile_0\…` and `./Saves/…` names, plus a deeper `profile_0/backup/`: the root is `Saves/`;
+  - killed between the renames: the old saves come back. Killed while deleting them: the leftover is deleted. A half-unpacked `Darkest.import/` is thrown away by the next import.
+- [ ] Release: publish `get-saves.bat` with the next release, since the Import hint points at the Releases page.
+- [x] **Verify on the Galaxy A34** (debug build, installed fresh; GOG 27988 base game only; picks made over adb with uiautomator):
+  - **Launch screen:** the three cards fit at 2340×1080 without scrolling. Export is grey until there are saves. The hint dialog scrolls, and its last line ("This replaces the saves on this phone…") shows only when there are saves.
+  - **PC saves in:** the bat's zip (saves under `dd save/`) imported. All 43 files have the same md5 as the Windows originals, folders are 0700, files 0600 with the app's SELinux label, and nothing is left over. The campaign shows in the game's list (Week 92) and loads into the hamlet; `dd.log` has `as_load_campaign - LoadProfile()` and `Darkest::LoadCampaign …`. The game first asked "Required DLC is missing" (the save has DLC content and only the base game was imported), and Continue was picked for the phone copy.
+  - **Export:** `darkest-dungeon-saves-2026-10-26.zip` holds 44 entries (with the `persist.options.json` the game wrote), all deflated, at the root, the same bytes as a `run-as tar` of the folder.
+  - **Import over saves:** the PC zip over the game-rewritten saves: 43 files equal to the originals again, and the phone's `persist.options.json` kept (same md5).
+  - **Refused, saves unchanged (md5 of the folder):** a random file and a zip without `profile_<n>/` ("isn't a zip of saves"), two save folders ("a/ and b/"), and the 2.38 GB Steam game zip ("too big", at once). The `../` zip is also refused as "isn't a zip of saves": since Android 14, `ZipInputStream` itself throws on `..` names, so the first pass stops before the app's own check.
+  - **Stopped mid-import** (states made with `run-as`, then the app started): `Darkest.before-import/` alone came back as `Darkest/`; with both there, the old copy was deleted. The leftover `Darkest.import/` went away with the next import.
+  - **Uninstall round trip:** export, uninstall (the app's private and external folders are gone), install, import the game (85 s), import the export: the 43 save files equal the export, and the campaign (Hamlet, Week 92, 12,837 gold) loads.
+  - Seen: after a reinstall the game asks the analytics question again, because `persist.options.json` (where that answer and the volumes live) is never imported.
+- [ ] Not tested: a release build (same code; `run-as` needed the debug build for the checks), the OnePlus 5, a zip from Windows Explorer's "Compressed folder", and the bat on another PC.
 
 ## Steam copy (2026-10-23)
 Steam's Linux depots ship the same DRM-free `_linuxnosteam` build as GOG (Build 28212, GOG's is 27988). Copied to the OnePlus 5 by hand, it reached the title, the save list and the dungeon at 60 FPS on 0.3.1, and it reads the GOG saves.

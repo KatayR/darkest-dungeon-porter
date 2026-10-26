@@ -14,6 +14,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.provider.DocumentsContract;
 import android.system.Os;
 import android.text.InputType;
 import android.util.Log;
@@ -43,6 +44,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -58,16 +60,20 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Callable;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipException;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Runs the Linux x86_64 Darkest Dungeon in a child process (native/host: box64 + the game) and shows
@@ -75,7 +81,8 @@ import java.util.zip.ZipInputStream;
  * addresses the game binary needs. Game data is never part of the APK: the app imports it from GOG's
  * Linux installer (and its DLC installers), or from the Steam zip that port/steam/get-steam-game.bat
  * makes, into getExternalFilesDir()/game (see importGame), and runs it through a private mirror (see
- * mirrorGame).
+ * mirrorGame). The game's saves are in getFilesDir(); the launch screen exports them to a zip and
+ * imports them from one (see unpackSaves), so they can outlive an uninstall and move between devices.
  *
  * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
  * extras "height" and "fps" skip it.
@@ -93,7 +100,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     /** Frame rates that divide the 60 Hz refresh evenly: each frame stays up for whole refreshes. */
     private static final int[] FPS = { 60, 30, 20, 15 };
     private static final int SCANCODE_ESCAPE = 41;   // SDL_SCANCODE_ESCAPE
-    private static final int PICK_INSTALLER = 1;     // request code of the file picker
+    private static final int PICK_INSTALLER = 1;     // request codes of the file pickers
+    private static final int IMPORT_SAVES = 2, EXPORT_SAVES = 3;
+    private static final String SAVE_OPTIONS = "persist.options.json";   // the game's options, in the save folder
+    private static final long SAVES_MAX_BYTES = 100_000_000;   // saves are a few MB; a bigger file isn't read
+    private static final String NOT_SAVES =
+            "That file isn't a zip of Darkest Dungeon saves: it has no profile_0, profile_1, … folder.";
     private static final String INSTALLER_GAME = "data/noarch/game/";   // the game folder inside the installer
     private static final String GAME_BINARY = "_linuxnosteam/darkest.bin.x86_64";   // in the game folder
     private static final String NOT_A_GAME_FILE =
@@ -131,6 +143,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        try {
+            recoverSaves();
+        } catch (IOException e) {
+            Log.e(TAG, "cannot recover the saves of an unfinished import", e);
+        }
         Intent intent = getIntent();
         if (intent.hasExtra("height"))
             start(intent.getIntExtra("height", DEFAULT_HEIGHT), intent.getIntExtra("fps", FPS[0]));
@@ -140,9 +157,10 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Two cards: the resolution and frame rate on the left; importing the game or its DLCs, and what
-     * is imported so far, on the right. Play is below them, in the middle, once the game is imported.
-     * A message from the last import, if any, opens in a dialog with the title given.
+     * Three cards: the resolution and frame rate on the left, with the save file's import and export
+     * under them; importing the game or its DLCs, and what is imported so far, on the right. Play is
+     * below them, in the middle, once the game is imported. A message from the last import or export,
+     * if any, opens in a dialog with the title given.
      */
     private void showLaunchScreen(String dialogTitle, String dialogMessage) {
         boolean installed = gameBinary().exists();
@@ -158,6 +176,39 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         settings.addView(heights, below(c, 4));
         settings.addView(text(c, "Frame rate (lower saves battery)", 14, MUTED), below(c, 16));
         settings.addView(rates, below(c, 4));
+
+        // the save file card under the settings: Import and Export side by side
+        LinearLayout saves = card(c);
+        saves.setBackground(rounded(c));
+        saves.addView(heading(c, "Save file"));
+        LinearLayout saveButtons = new LinearLayout(c);
+        Button importSaves = button(c, "Import", BUTTON, TEXT);
+        importSaves.setOnClickListener(b -> askImportSaves());
+        Button exportSaves = button(c, "Export", BUTTON, TEXT);
+        exportSaves.setOnClickListener(b -> pickExportFile());
+        boolean hasSaves = hasSaves();
+        exportSaves.setEnabled(hasSaves);
+        if (!hasSaves)
+            exportSaves.setTextColor(MUTED);
+        for (Button b : new Button[] { importSaves, exportSaves }) {
+            b.setMinWidth(0);   // two share the narrow card
+            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+            if (b == importSaves)
+                half.rightMargin = dp(c, 8);
+            saveButtons.addView(b, half);
+        }
+        saves.addView(saveButtons, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout leftCards = new LinearLayout(c);
+        leftCards.setOrientation(LinearLayout.VERTICAL);
+        leftCards.addView(settings, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+        LinearLayout.LayoutParams underSettings = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        underSettings.topMargin = dp(c, 12);
+        leftCards.addView(saves, underSettings);
+        ScrollView leftScroll = new ScrollView(c);   // both cards can be taller than a short screen
+        leftScroll.setFillViewport(true);
+        leftScroll.addView(leftCards);
 
         // what is imported (once the game is), then the hint and the import button, at the right
         LinearLayout files = card(c);
@@ -195,7 +246,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         LinearLayout cards = new LinearLayout(c);
         LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 2);
         left.rightMargin = dp(c, 12);
-        cards.addView(settings, left);
+        cards.addView(leftScroll, left);
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3);
         right.leftMargin = dp(c, 12);
         cards.addView(filesScroll, right);
@@ -379,9 +430,44 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 .setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_INSTALLER);
     }
 
+    /** What the save import takes and where to get it, then the system file picker for the zip. */
+    private void askImportSaves() {
+        String message = "Pick a zip of a Darkest Dungeon save folder, the folder that holds profile_0, "
+                + "profile_1 and so on. The folder can be anywhere inside the zip.\n\n"
+                + "From a Windows PC:\n"
+                + "•  GOG: run get-saves.bat from the Releases page. It zips Documents\\Darkest into "
+                + "darkest-dungeon-saves.zip next to it.\n"
+                + "•  Steam: drop the folder Steam\\userdata\\<number>\\262060\\remote onto get-saves.bat, "
+                + "or zip it.\n"
+                + "•  Or zip the save folder yourself.\n\n"
+                + "A zip made by Export works too. The game options on this phone are kept."
+                + (hasSaves() ? "\n\nThis replaces the saves on this phone. Export them first to keep a copy." : "");
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Import saves")
+                .setMessage(message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Pick zip", (d, w) -> startActivityForResult(
+                        new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"),
+                        IMPORT_SAVES))
+                .show();
+    }
+
+    /** The system file picker, for where the exported saves go. */
+    private void pickExportFile() {
+        startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("application/zip")
+                .putExtra(Intent.EXTRA_TITLE, "darkest-dungeon-saves-" + LocalDate.now() + ".zip"), EXPORT_SAVES);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode != PICK_INSTALLER || resultCode != RESULT_OK || data == null)
+        if (resultCode != RESULT_OK || data == null)
+            return;
+        if (requestCode == IMPORT_SAVES && data.getData() != null)
+            saveTask("Importing saves.", "Saves imported", "Couldn't import saves", () -> unpackSaves(data.getData()));
+        if (requestCode == EXPORT_SAVES && data.getData() != null)
+            saveTask("Exporting saves.", "Saves exported", "Couldn't export saves", () -> exportSaves(data.getData()));
+        if (requestCode != PICK_INSTALLER)
             return;
         List<Uri> files = new ArrayList<>();
         if (data.getClipData() != null)   // several files picked
@@ -393,19 +479,44 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             importGame(files);
     }
 
-    /** Unpacks the picked installers or zips on a background thread, showing the progress. */
-    private void importGame(List<Uri> files) {
+    /** The message with a progress bar under it, in place of the launch screen while work runs. */
+    private ProgressBar progressScreen(String message) {
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
         ProgressBar bar = new ProgressBar(c, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
         bar.setProgressTintList(ColorStateList.valueOf(ACCENT));
+        bar.setIndeterminateTintList(ColorStateList.valueOf(ACCENT));
         LinearLayout layout = column(c);
         layout.setBackgroundColor(BACKGROUND);
-        layout.addView(text(c, "Importing. Please keep the app open until this finishes.", 16, TEXT), wrap());
+        layout.addView(text(c, message, 16, TEXT), wrap());
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(c, 360), LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(c, 16);
         layout.addView(bar, lp);
         setContentView(layout);
+        return bar;
+    }
+
+    /**
+     * Runs a save import or export on a background thread behind a progress screen (so Play can't
+     * start the game meanwhile), then opens the launch screen with its message, or with why it failed.
+     */
+    private void saveTask(String busy, String doneTitle, String failedTitle, Callable<String> task) {
+        progressScreen(busy).setIndeterminate(true);
+        new Thread(() -> {
+            try {
+                String message = task.call();
+                handler.post(() -> showLaunchScreen(doneTitle, message));
+            } catch (Exception e) {
+                Log.e(TAG, failedTitle, e);
+                String why = e.getMessage() != null ? e.getMessage() : e.toString();
+                handler.post(() -> showLaunchScreen(failedTitle, why));
+            }
+        }).start();
+    }
+
+    /** Unpacks the picked installers or zips on a background thread, showing the progress. */
+    private void importGame(List<Uri> files) {
+        ProgressBar bar = progressScreen("Importing. Please keep the app open until this finishes.");
         new Thread(() -> {
             try {
                 String note = unpackGame(files, percent -> handler.post(() -> bar.setProgress(percent)));
@@ -978,6 +1089,163 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     private File gameBinary() {
         return new File(gameDir(), GAME_BINARY);
+    }
+
+    /** The game's save folder: ddglue's SDL_GetPrefPath("Red Hook Studios", "Darkest") under DD_HOME. */
+    private File savesDir() {
+        return new File(getFilesDir(), ".local/share/Red Hook Studios/Darkest");
+    }
+
+    private boolean hasSaves() {
+        String[] names = savesDir().list();
+        return names != null && names.length > 0;
+    }
+
+    /** Where unpackSaves keeps the replaced saves until the imported ones are in place. */
+    private File replacedSaves() {
+        return new File(savesDir().getParentFile(), "Darkest.before-import");
+    }
+
+    /**
+     * Sorts out a save import the app was stopped in the middle of swapping: with Darkest/ in place
+     * the import got through and the replaced saves are deleted; without it they are put back.
+     */
+    private void recoverSaves() throws IOException {
+        File saves = savesDir(), replaced = replacedSaves();
+        if (!replaced.exists())
+            return;
+        if (saves.exists())
+            deleteTree(replaced);
+        else if (!replaced.renameTo(saves))
+            throw new IOException("Couldn't put the saves back: " + replaced + " → " + saves);
+    }
+
+    /** Zips the contents of the save folder (global.json, profile_0/… at the zip's root) into the picked file. */
+    private String exportSaves(Uri file) throws Exception {
+        Path saves = savesDir().toPath();
+        int count = 0;
+        try (OutputStream out = getContentResolver().openOutputStream(file, "w")) {
+            if (out == null)
+                throw new IOException("Couldn't write the file picked.");
+            try (ZipOutputStream zip = new ZipOutputStream(new BufferedOutputStream(out, 1 << 16));
+                 Stream<Path> paths = Files.walk(saves)) {
+                for (Path p : (Iterable<Path>) paths.sorted()::iterator) {
+                    if (!Files.isRegularFile(p, LinkOption.NOFOLLOW_LINKS))
+                        continue;
+                    ZipEntry e = new ZipEntry(saves.relativize(p).toString());
+                    e.setTime(Files.getLastModifiedTime(p).toMillis());
+                    zip.putNextEntry(e);
+                    Files.copy(p, zip);
+                    zip.closeEntry();
+                    count++;
+                }
+            }
+        } catch (Exception e) {
+            try {   // no half-written zip that looks like saves
+                DocumentsContract.deleteDocument(getContentResolver(), file);
+            } catch (Exception ignored) {
+            }
+            throw e;
+        }
+        return count + " files were saved in the zip. To bring the saves back, for example after reinstalling "
+                + "the app or on another phone, tap Import and pick it.";
+    }
+
+    /**
+     * Replaces the saves with the save folder in the picked zip: the shallowest folder in it that holds
+     * a profile_<n>/ folder, so a zip of a PC's save folder (in a folder of its own or not) works as
+     * well as one from exportSaves. The zip is read twice, first for its names, then to unpack that
+     * folder into Darkest.import/. The zip's persist.options.json (from a PC: its resolution and
+     * fullscreen) is left out and the phone's own kept. Darkest/ then becomes Darkest.before-import/
+     * and Darkest.import/ becomes Darkest/; recoverSaves finishes the swap if the app is stopped in it.
+     */
+    private String unpackSaves(Uri file) throws IOException {
+        File saves = savesDir(), tmp = new File(saves.getParentFile(), "Darkest.import"), replaced = replacedSaves();
+        recoverSaves();
+        deleteTree(tmp);   // left by an import that didn't finish
+        String root = null;
+        try (FileChannel ch = open(file)) {
+            if (ch.size() > SAVES_MAX_BYTES)
+                throw new IOException(String.format(Locale.US,
+                        "That file is too big to be saves (%.0f MB; saves are a few MB).", ch.size() / 1e6));
+            List<String> names = new ArrayList<>();
+            ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Channels.newInputStream(ch), 1 << 16));
+            for (ZipEntry e; (e = zip.getNextEntry()) != null; )
+                names.add(entryName(e));
+            root = saveRoot(names);
+
+            ch.position(0);
+            zip = new ZipInputStream(new BufferedInputStream(Channels.newInputStream(ch), 1 << 16));
+            String base = tmp.getCanonicalPath() + "/";
+            for (ZipEntry e; (e = zip.getNextEntry()) != null; ) {
+                String name = entryName(e);
+                if (!name.startsWith(root) || name.length() == root.length() || name.equals(root + SAVE_OPTIONS))
+                    continue;
+                File out = new File(tmp, name.substring(root.length()));
+                if (!out.getCanonicalPath().startsWith(base))
+                    throw new IOException("The zip looks damaged (unexpected file name: " + e.getName() + ").");
+                if (name.endsWith("/")) {
+                    out.mkdirs();
+                    continue;
+                }
+                out.getParentFile().mkdirs();
+                try (OutputStream o = new FileOutputStream(out)) {
+                    copy(zip, o);
+                }
+                if (e.getTime() >= 0)
+                    out.setLastModified(e.getTime());
+            }
+        } catch (ZipException e) {
+            throw new IOException(root == null ? NOT_SAVES : DAMAGED, e);
+        }
+        File options = new File(saves, SAVE_OPTIONS);
+        if (options.isFile())
+            Files.copy(options.toPath(), new File(tmp, SAVE_OPTIONS).toPath(), StandardCopyOption.REPLACE_EXISTING);
+        if (saves.exists() && !saves.renameTo(replaced))
+            throw new IOException("Couldn't move the old saves aside: " + saves + " → " + replaced);
+        if (!tmp.renameTo(saves)) {
+            replaced.renameTo(saves);
+            throw new IOException("Couldn't move the imported saves into place: " + tmp + " → " + saves);
+        }
+        deleteTree(replaced);
+        return "Tap Play, and the campaigns are in the game's save list.";
+    }
+
+    /** A zip entry's name with / between folders and no leading ./ or /, as Windows tools may write them. */
+    private static String entryName(ZipEntry e) {
+        String name = e.getName().replace('\\', '/');
+        while (name.startsWith("/") || name.startsWith("./"))
+            name = name.substring(name.startsWith("/") ? 1 : 2);
+        return name;
+    }
+
+    /**
+     * The save folder among a zip's names, with a / at its end ("" for the zip's root): the shallowest
+     * folder holding a profile_<n>/ folder. Two different ones at that depth are refused.
+     */
+    private static String saveRoot(List<String> names) throws IOException {
+        List<String> roots = new ArrayList<>();   // those found at the smallest depth so far
+        int depth = Integer.MAX_VALUE;
+        for (String name : names) {
+            String[] parts = name.split("/");
+            for (int i = 0; i < parts.length - 1 && i <= depth; i++)   // folders only
+                if (parts[i].matches("profile_\\d+")) {
+                    String root = i == 0 ? "" : String.join("/", Arrays.asList(parts).subList(0, i)) + "/";
+                    if (i < depth) {
+                        roots.clear();
+                        depth = i;
+                    }
+                    if (!roots.contains(root))
+                        roots.add(root);
+                    break;
+                }
+        }
+        if (roots.isEmpty())
+            throw new IOException(NOT_SAVES);
+        if (roots.size() > 1)
+            throw new IOException("That zip holds more than one save folder (" + names(roots)
+                    + "). Please zip only the one to import.");
+        return roots.get(0);
     }
 
     /**
