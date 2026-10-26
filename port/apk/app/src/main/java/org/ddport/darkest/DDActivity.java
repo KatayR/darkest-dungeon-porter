@@ -601,7 +601,14 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 try {
                     int code = gameProcess.waitFor();
                     Log.i(TAG, "game process exited with " + code);
-                    handler.post(this::finish);
+                    // ddview serves one game per process: its socket and threads last until the
+                    // process ends, which Android delays after an activity finishes, and Play in
+                    // that process again couldn't listen on the socket. So the app process ends
+                    // with the game, at once, and the next launch starts afresh.
+                    handler.post(() -> {
+                        finish();
+                        android.os.Process.killProcess(android.os.Process.myPid());
+                    });
                 } catch (InterruptedException ignored) {
                 }
             }).start();
