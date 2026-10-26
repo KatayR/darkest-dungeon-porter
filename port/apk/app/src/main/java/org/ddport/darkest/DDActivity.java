@@ -172,7 +172,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         LinearLayout settings = card(c);
         settings.setBackground(rounded(c));
         settings.addView(heading(c, "Settings"));
-        settings.addView(text(c, "Resolution (lower saves battery)", 14, MUTED), below(c, 16));
+        settings.addView(text(c, "Resolution (lower saves battery)", 14, MUTED), below(c, 12));
         settings.addView(heights, below(c, 4));
         settings.addView(text(c, "Frame rate (lower saves battery)", 14, MUTED), below(c, 16));
         settings.addView(rates, below(c, 4));
@@ -217,7 +217,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             TextView title = text(c, "Imported", 12, MUTED);
             title.setAllCaps(true);
             title.setLetterSpacing(0.1f);
-            files.addView(title, below(c, 12));
+            files.addView(title, below(c, 8));
             List<String> imported = imported();
             for (int i = 0; i < imported.size(); i++) {
                 TextView item = text(c, "✓  " + imported.get(i), 16, TEXT);
@@ -227,7 +227,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             }
             files.addView(text(c, "Pick one or more of GOG's DLC installers.", 14, MUTED), below(c, 16));
         } else {
-            files.addView(text(c, "Pick one of these:", 14, MUTED), below(c, 12));
+            files.addView(text(c, "Pick one of these:", 14, MUTED), below(c, 8));
             files.addView(source(c, "GOG's Linux installer", "darkest_dungeon_…_linux_….sh"), below(c, 4));
             files.addView(source(c, "The Steam zip", "darkest-dungeon-steam.zip"), below(c, 4));
             files.addView(text(c, "For GOG, DLC installers can be picked together with the game. "
@@ -437,8 +437,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 + "From a Windows PC:\n"
                 + "•  GOG: run get-saves.bat from the Releases page. It zips Documents\\Darkest into "
                 + "darkest-dungeon-saves.zip next to it.\n"
-                + "•  Steam: drop the folder Steam\\userdata\\<number>\\262060\\remote onto get-saves.bat, "
-                + "or zip it.\n"
+                + "•  Steam: drop the folder Steam\\userdata\\<number>\\262060\\remote onto get-saves.bat.\n"
                 + "•  Or zip the save folder yourself.\n\n"
                 + "A zip made by Export works too. The game options on this phone are kept."
                 + (hasSaves() ? "\n\nThis replaces the saves on this phone. Export them first to keep a copy." : "");
