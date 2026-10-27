@@ -218,9 +218,10 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
 
 // ---- the game's state (Shift and walk buttons) ----
 // The game binary sits at its fixed addresses in this process and keeps its symbols, so the state
-// behind the app's buttons is read the way the game's own code reads it. Every offset is checked in
-// the game's code first (the same in GOG 27988 and Steam 28212); a build where one differs never gets
-// that button.
+// behind the app's buttons is read the way the game's own code reads it. The offsets differ between
+// builds (GOG 26186 keeps the trinket panel at +0x2fe0, GOG 27988 and Steam 28212 at +0x2f70), so each
+// is taken from the instruction that uses it in the game's code; a build whose code there differs in
+// anything else never gets that button. The offsets below are those of 27988 and 28212.
 // - The trinket inventory (Shift button): the game sells a trinket on Shift-click while it is open,
 //   which touch can't do. Read like TownDisplay::GetIsRealmInventoryVisible: TownDisplay::s_Instance
 //   (NULL outside the hamlet), the panel at +0x2f70, and its state (UI::Panel::Base::GetIsActive: the
@@ -230,17 +231,30 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
 //   its state (Battle::GetState: the int at +0x248), 0 outside a battle. The raid already exists while
 //   its loading screen shows, so that is read too, like LoadingScreen::GetIsActive:
 //   LoadingScreen::s_Instance and the byte at +0x2cc (set by StartScreen, cleared by FinishScreen).
-#define TRINKETS_PANEL 0x2f70
-#define PANEL_STATE    0x38
-#define RAID_BATTLE    0x4778
-#define BATTLE_STATE   0x248
-#define LOADING_ACTIVE 0x2cc
 static char **town_display;   // &TownDisplay::s_Instance; NULL: no Shift button
 static char **raid;           // &Raid::s_Instance; NULL: no walk buttons
 static char **loading;        // &LoadingScreen::s_Instance (set with raid)
+static long trinkets_state;   // the trinket panel's state in TownDisplay (panel + its state)
+static long battle_state_in_raid;   // the battle's state in Raid (battle + its state)
+static long loading_flag;     // the loading screen's active byte in LoadingScreen
+
+// the offset in the instruction at addr in the game's code, whose bytes are those of the template
+// except the offset's own (size bytes at at, little-endian); -1 if the code there differs
+static long code_offset(const unsigned char *f, const Elf64_Shdr *text, Elf64_Addr addr,
+                        const unsigned char *bytes, size_t len, size_t at, size_t size) {
+    if (addr < text->sh_addr || addr + len > text->sh_addr + text->sh_size)
+        return -1;
+    const unsigned char *code = f + text->sh_offset + (addr - text->sh_addr);
+    if (memcmp(code, bytes, at) || memcmp(code + at + size, bytes + at + size, len - at - size))
+        return -1;
+    long offset = 0;
+    for (size_t i = size; i--;)
+        offset = offset << 8 | code[at + i];
+    return offset;
+}
 
 // finds TownDisplay::s_Instance, Raid::s_Instance and LoadingScreen::s_Instance in the game binary's
-// symbols and checks the offsets above
+// symbols and reads the offsets above from the game's code
 static void find_game_state(void) {
     const char *base = getenv("DD_BASE_PATH");
     char path[1024];
@@ -294,33 +308,47 @@ static void find_game_state(void) {
                 loading_active = sym[i].st_value;
         }
     }
+    // the instructions that read the state, with 27988's offsets (any offset matches)
     static const unsigned char add_panel[] = { 0x48, 0x81, 0xc7, 0x70, 0x2f, 0x00, 0x00 };    // add $0x2f70,%rdi
     static const unsigned char cmp_state[] = { 0x83, 0x7f, 0x38, 0x00 };                      // cmpl $0,0x38(%rdi)
     static const unsigned char add_battle[] = { 0x48, 0x81, 0xc7, 0x78, 0x47, 0x00, 0x00 };   // add $0x4778,%rdi
     static const unsigned char mov_state[] = { 0x8b, 0x87, 0x48, 0x02, 0x00, 0x00 };          // mov 0x248(%rdi),%eax
     static const unsigned char movzb_loading[] = { 0x0f, 0xb6, 0x87, 0xcc, 0x02, 0x00, 0x00 };   // movzbl 0x2cc(%rdi),%eax
-#define CODE_IS(addr, bytes) ((addr) >= text->sh_addr && (addr) + sizeof bytes <= text->sh_addr + text->sh_size \
-                              && !memcmp(f + text->sh_offset + ((addr) - text->sh_addr), bytes, sizeof bytes))
+#define CODE_OFFSET(addr, bytes, at, size) code_offset(f, text, addr, bytes, sizeof bytes, at, size)
+    long panel = -1, panel_state = -1, battle = -1, state = -1, flag = -1;
+    if (instance && visible && active) {
+        panel = CODE_OFFSET(visible + 8, add_panel, 3, 4);
+        panel_state = CODE_OFFSET(active, cmp_state, 2, 1);
+    }
+    if (raid_instance && in_battle && battle_state && loading_instance && loading_active) {
+        battle = CODE_OFFSET(in_battle + 1, add_battle, 3, 4);   // +1: push %rax
+        state = CODE_OFFSET(battle_state, mov_state, 2, 4);
+        flag = CODE_OFFSET(loading_active, movzb_loading, 3, 4);
+    }
+#undef CODE_OFFSET
     if (!instance || !visible || !active)
         LOG("no Shift button: the game binary lacks the trinket inventory's symbols");
-    else if (!CODE_IS(visible + 8, add_panel) || !CODE_IS(active, cmp_state))
-        LOG("no Shift button: this game build keeps the trinket inventory elsewhere");
+    else if (panel < 0 || panel_state < 0)
+        LOG("no Shift button: this game build reads the trinket inventory differently");
     else {
         town_display = (char **)instance;
-        LOG("trinket inventory: TownDisplay::s_Instance at 0x%llx", (unsigned long long)instance);
+        trinkets_state = panel + panel_state;
+        LOG("trinket inventory: TownDisplay::s_Instance at 0x%llx, the panel at +0x%lx, its state at +0x%lx",
+            (unsigned long long)instance, panel, panel_state);
     }
     if (!raid_instance || !in_battle || !battle_state || !loading_instance || !loading_active)
         LOG("no walk buttons: the game binary lacks the dungeon's symbols");
-    else if (!CODE_IS(in_battle + 1, add_battle) || !CODE_IS(battle_state, mov_state)   // +1: push %rax
-             || !CODE_IS(loading_active, movzb_loading))
-        LOG("no walk buttons: this game build keeps the battle or loading state elsewhere");
+    else if (battle < 0 || state < 0 || flag < 0)
+        LOG("no walk buttons: this game build reads the battle or loading state differently");
     else {
         raid = (char **)raid_instance;
         loading = (char **)loading_instance;
-        LOG("dungeon: Raid::s_Instance at 0x%llx, LoadingScreen::s_Instance at 0x%llx",
-            (unsigned long long)raid_instance, (unsigned long long)loading_instance);
+        battle_state_in_raid = battle + state;
+        loading_flag = flag;
+        LOG("dungeon: Raid::s_Instance at 0x%llx, the battle at +0x%lx, its state at +0x%lx; "
+            "LoadingScreen::s_Instance at 0x%llx, its flag at +0x%lx",
+            (unsigned long long)raid_instance, battle, state, (unsigned long long)loading_instance, flag);
     }
-#undef CODE_IS
     munmap((void *)f, st.st_size);
 }
 
@@ -334,7 +362,7 @@ static void check_game_state(void) {
     }
     if (town_display) {
         char *town = *town_display;
-        int state = town ? *(int *)(town + TRINKETS_PANEL + PANEL_STATE) : 0;
+        int state = town ? *(int *)(town + trinkets_state) : 0;
         int now = state >= 1 && state <= 4;
         if (now != open) {
             open = now;
@@ -344,7 +372,7 @@ static void check_game_state(void) {
     }
     if (raid) {
         char *r = *raid, *l = *loading;
-        int now = r && *(int *)(r + RAID_BATTLE + BATTLE_STATE) == 0 && !(l && l[LOADING_ACTIVE]);
+        int now = r && *(int *)(r + battle_state_in_raid) == 0 && !(l && l[loading_flag]);
         if (now != walk) {
             walk = now;
             LOG("walk buttons %s", walk ? "shown" : "hidden");

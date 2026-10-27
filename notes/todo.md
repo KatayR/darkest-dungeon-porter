@@ -1181,3 +1181,25 @@ Asked for: detect when the party is in a dungeon and not in a fight, and show le
 - They sit at the left and right edges, a little above the middle of the corridor, and cover only scenery. When the party stands at the far left, the left one can overlap the last hero a little (it's 85% opaque).
 - Asked after the test: taller, narrower and more see-through. Then: half the gap between the buttons and the hero panel (the scene above, the panel below), closer to the edges, a lighter grey instead of amber while held, and fainter. Now 56×94 dp (a third shorter, asked after that), 8 dp from the edges, centred at 43.5% of the screen height, 30% opaque, grey 0xFF4A4A53 while held. The Shift button stays amber. (First read as "halve the gaps to the screen's top and bottom", which made them 67% of the screen tall.)
 - [ ] Not tested: going back to the hamlet (should log "hidden"); the map, curios and camp with the arrows up; going to the background with an arrow held; GOG 27988 on a phone; ◀.
+
+## Shift and walk buttons on other game builds (2026-10-27)
+Reported: two players on GOG build 26186 never see the Shift button. The owner found a copy of that build's Linux installer (`darkest_dungeon_26186_81633.sh`; only its zip was read, nothing run).
+
+**Findings (Python, the same steps as ddglue's lookup, GOG 26186 / GOG 27988 / Steam 28212):**
+- All eight symbols exist in all three. The instructions are the same apart from their offsets, and 26186 has different ones:
+  - `GetIsRealmInventoryVisible`+8: `add $0x2fe0,%rdi` in 26186, `$0x2f70` in 27988/28212.
+  - `Raid::IsInBattle`+1: `add $0x4748,%rdi` in 26186, `$0x4778` in 27988/28212.
+  - `Battle::GetState`: `mov 0x228(%rdi),%eax` in 26186, `0x248` in 27988/28212.
+  - `UI::Panel::Base::GetIsActive` (`cmpl $0,0x38(%rdi)`) and `LoadingScreen::GetIsActive` (`movzbl 0x2cc(%rdi),%eax`) are the same in all three.
+- The glue compared the whole instructions, offsets included, so on 26186 it logged "keeps the trinket inventory elsewhere" and showed no Shift button (and the walk buttons would never show there either).
+
+**Plan:**
+- [x] ddglue: check each instruction's bytes except its offset, and take the offset from the game's code instead of a constant. A build whose code differs elsewhere still gets no button. Log the offsets that were read.
+- [x] Verify: a Python copy of the new lookup reads 0x2fe0/0x38, 0x4748/0x228, 0x2cc from 26186 and the old constants from 27988 and 28212; the natives build.
+
+**Review:**
+- `code_offset()` compares an instruction with its template except for the offset bytes, and returns the offset. The five offsets are now read from the game's code (panel + its state, battle + its state, the loading flag) and logged.
+- On the PC, a Python copy reads 0x2fe0/0x38, 0x4748/0x228, 0x2cc from GOG 26186 and 0x2f70/0x38, 0x4778/0x248, 0x2cc from GOG 27988 and Steam 28212. A wrong address, a changed byte outside the offset, or an address outside `.text` gives -1.
+- The debug APK builds without warnings. On the OnePlus 5 (Steam 28212) the glue logged "the panel at +0x2f70, its state at +0x38" and "the battle at +0x4778, its state at +0x248 ... its flag at +0x2cc", the old constants.
+- [ ] Not tested: GOG 26186 on a phone. The installer comes from an unknown website, so it is never run or imported; it waits for a player on 26186 to confirm (the logcat line should show +0x2fe0).
+- From now on, anything read from the game binary is checked against all three builds (26186 statically only).
