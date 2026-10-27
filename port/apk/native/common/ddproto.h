@@ -33,6 +33,8 @@ enum {
     DD_WARP,          // a=x b=y: the game moved the mouse
     DD_TEXT_INPUT,    // a=1 the game wants text (keyboard up) / 0 it doesn't
     DD_SHIFT_SCREEN,  // a=1 the trinket inventory is open, where Shift-click sells (Shift button up) / 0 it isn't
+    DD_WALK_SCREEN,   // a=1 the party is in a dungeon and not in a battle, where Left/Right walk it
+                      // (arrow buttons up) / 0 it isn't
 };
 
 typedef struct {

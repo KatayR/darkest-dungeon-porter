@@ -22,6 +22,7 @@ Project rules learned from mistakes made during the port.
 
 ## Debugging a closed-source binary
 - When a fix "doesn't work", test the hypothesis before building the workaround. The shader-type theory was wrong, and a one-file experiment showed it before any gl4es work was done. If the binary has symbols, disassembling the failing function (`llvm-objdump -C`) found the real cause, the file size and focus checks, faster than guessing.
+- An object existing is not the same as its screen showing. The walk buttons first keyed on `Raid::s_Instance`, and showed over the dungeon's loading screen, because the raid is created before it loads. When gating UI on game state, list every screen that shows while the object exists (loading, transitions, menus over it) and check each one before testing.
 
 ## Emulation bugs
 - If emulated code computes garbage the same way under the dynarec, with exact float flags, and in the interpreter (`BOX64_NODYNAREC=start-end` runs just one address range interpreted), the bug is not in the x86 code. It is in a wrapped native function it calls. Look at Box64's `#ifdef ANDROID` stand-ins first (`qsort_r` was a broken quicksort).
@@ -87,3 +88,6 @@ Project rules learned from mistakes made during the port.
 - Controller presses can't be faked on the unrooted A34. `sendevent` into the controller's `/dev/input` node is denied for the shell user (SELinux), even though shell is in the `input` group. `input keyevent` comes from a virtual device, which the app doesn't count as a controller. Ask for real presses and check the result with screenshots and logcat.
 - Before overriding an SDL call in the glue, check Box64's `wrappedsdl2_private.h`. A plain `GO` entry means the game reaches the glue's definition. A `GOM` entry means Box64's own wrapper runs first.
 - Check whether the real SDL function already works before overriding it. `SDL_GameControllerEventState` only sets event states, so it needed no override.
+
+## UI changes asked in words
+- Restate a layout request in screen terms (what moves, by how much, measured from what) before building it, when it can be read two ways. "Halve the gap between upper and bottom part of screen and the buttons" was read as the gaps to the screen's top and bottom edges, which made the buttons two-thirds of the screen tall and cost an install cycle; the next guess (the gap to the hero panel) was still not it. Ask where the edges should land before building.

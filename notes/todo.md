@@ -1150,3 +1150,34 @@ Asked for: the game sells trinkets on Shift-click, which touch can't do. Detect 
 - The button covers only town scenery at the left, not the panel, the roster or the bottom bar (screenshots).
 - [ ] Not tested: going to the background with Shift on; the trinket panel opened from a hero's screen or the embark screen; a hardware keyboard's Shift.
 - [x] Release 0.4.5 (versionCode 9), signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat`.
+
+## Walk buttons in the dungeon (2026-10-27)
+Asked for: detect when the party is in a dungeon and not in a fight, and show left and right arrow buttons that walk it.
+
+**Findings (GOG 27988, llvm-nm/objdump):**
+- `Raid::s_Instance` (`_ZN4Raid10s_InstanceE`) is a pointer: `Raid::Create()` sets it, `Raid::Destroy()` sets it back to NULL, so it is non-NULL only during an expedition.
+- `DungeonController::IsInCombat()` is `Raid::IsInBattle()` on it: `add $0x4778,%rdi` (`48 81 c7 78 47 00 00`, at +1 after `push %rax`), then `Battle::GetState()`, which is `mov 0x248(%rdi),%eax` (`8b 87 48 02 00 00`). The state is 0 outside a battle.
+- `RaidUI::Screen::RaidDisplay::ProcessMovementInput()` walks left while `Input_IsAnyKeyDown({SDLK_a, SDLK_LEFT})` and right on `{SDLK_d, SDLK_RIGHT}`. The app already sends Left/Right as scancodes 80/79, so holding those keys walks the party; the key path needs nothing new. (`DungeonController::UpdatePartyMoveDirection` reads only a controller's stick.)
+- Steam 28212 (from `darkest-dungeon-steam.zip`): `Raid::s_Instance` at 0x37ba370 (GOG 0x37ba380), and the same two instructions.
+- Rule: the buttons show while `Raid::s_Instance` is set and its battle state is 0. They may also show over the map, a curio or loot popup and the camp; the game's own checks keep the party still there.
+- The first build also showed them on the dungeon's loading screen: the raid exists while it loads. So the rule also needs "no loading screen": `LoadingScreen::s_Instance` (`_ZN13LoadingScreen10s_InstanceE`) and `LoadingScreen::GetIsActive()`, `movzbl 0x2cc(%rdi),%eax` (`0f b6 87 cc 02 00 00`). `StartScreen` sets that byte to 1, and `FinishScreen` clears it (with the 16 bytes from +0x2c0). Steam 28212 has it at 0x38b22a8 (GOG 0x38b22b8), with the same instruction.
+
+**Plan:**
+- [x] `ddproto.h`: `DD_WALK_SCREEN` (game → app, a=1 the party is in a dungeon and not in a battle / 0 it isn't).
+- [x] ddglue: one lookup in the game binary for both features (one mmap and `.symtab` pass, each feature checked and logged on its own), and at each swap send `DD_WALK_SCREEN` when the state changes, and log it.
+- [x] ddview: `DD_WALK_SCREEN` calls `DDActivity.onWalkScreen(boolean)`, like `onShiftScreen`.
+- [x] DDActivity: ◀ and ▶ buttons at the left and right edges of the corridor, holding Left/Right while pressed. A held key is released when the buttons hide and when the surface goes away.
+- [x] README Controls: one line.
+- [x] Verify:
+  - On the PC: a Python copy of the lookup finds the eight symbols and five instructions in both binaries.
+  - On the A34 (debug build): `logcat -s ddglue` shows the lookup and "walk buttons shown/hidden"; no buttons in town; they show in a corridor and a room, holding one walks the party, and letting go stops it; they hide in a battle and come back after it; screenshots show what they cover.
+
+**Review (OnePlus 5, debug build, Steam 28212):**
+- The glue found `Raid::s_Instance` at 0x37ba370 and `LoadingScreen::s_Instance` at 0x38b22a8 at the first frame.
+- On the PC, a Python copy of the lookup found the eight symbols and the five instructions in both GOG 27988 and Steam 28212.
+- Holding ▶ walked the party along the corridor (screenshots before and after); the owner confirmed it on the phone.
+- The first build showed the arrows on the dungeon's loading screen (the owner spotted it); with the loading-screen check they stay hidden there, as the screenshot of the "The Old Road" loading screen shows.
+- Entering the room into a battle: no arrows. After the battle (played by the owner) the log said "walk buttons shown" and they came back.
+- They sit at the left and right edges, a little above the middle of the corridor, and cover only scenery. When the party stands at the far left, the left one can overlap the last hero a little (it's 85% opaque).
+- Asked after the test: taller, narrower and more see-through. Then: half the gap between the buttons and the hero panel (the scene above, the panel below), closer to the edges, a lighter grey instead of amber while held, and fainter. Now 56×94 dp (a third shorter, asked after that), 8 dp from the edges, centred at 43.5% of the screen height, 30% opaque, grey 0xFF4A4A53 while held. The Shift button stays amber. (First read as "halve the gaps to the screen's top and bottom", which made them 67% of the screen tall.)
+- [ ] Not tested: going back to the hamlet (should log "hidden"); the map, curios and camp with the arrows up; going to the background with an arrow held; GOG 27988 on a phone; ◀.

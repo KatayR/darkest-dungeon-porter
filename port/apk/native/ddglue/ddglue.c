@@ -19,7 +19,9 @@
 //   received only when a printable key goes down, one character per frame.
 // - Cursor: the game's colour cursors go to the app, which draws them over the frame.
 // - Shift screen: the app shows a Shift button while the trinket inventory is open (Shift-click sells
-//   there); the panel's state is read from the game's memory (see "the trinket inventory" below).
+//   there); the panel's state is read from the game's memory (see "the game's state" below).
+// - Walk screen: the app shows arrow buttons, which hold Left/Right, while the party is in a dungeon
+//   and not in a battle; read from the game's memory the same way.
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
 // Protocol: ../common/ddproto.h.
@@ -214,27 +216,39 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
     if (h) *h = height;
 }
 
-// ---- the trinket inventory (Shift button) ----
-// The game sells a trinket on Shift-click while its trinket inventory is open, which touch can't do,
-// so the app shows a Shift button then. The game binary sits at its fixed addresses in this process
-// and keeps its symbols, so the panel's state is read the way the game's own
-// TownDisplay::GetIsRealmInventoryVisible reads it: TownDisplay::s_Instance (NULL outside the hamlet),
-// the panel at +0x2f70, and its state (UI::Panel::Base::GetIsActive: the int at +0x38): 0 closed,
-// 1-4 opening or open, 5-7 closing. Both offsets are checked in the game's code first (the same in
-// GOG 27988 and Steam 28212); a build where they differ never gets the button.
+// ---- the game's state (Shift and walk buttons) ----
+// The game binary sits at its fixed addresses in this process and keeps its symbols, so the state
+// behind the app's buttons is read the way the game's own code reads it. Every offset is checked in
+// the game's code first (the same in GOG 27988 and Steam 28212); a build where one differs never gets
+// that button.
+// - The trinket inventory (Shift button): the game sells a trinket on Shift-click while it is open,
+//   which touch can't do. Read like TownDisplay::GetIsRealmInventoryVisible: TownDisplay::s_Instance
+//   (NULL outside the hamlet), the panel at +0x2f70, and its state (UI::Panel::Base::GetIsActive: the
+//   int at +0x38): 0 closed, 1-4 opening or open, 5-7 closing.
+// - Walking (arrow buttons): in a dungeon the party walks while Left or Right is held, outside a battle.
+//   Read like Raid::IsInBattle: Raid::s_Instance (NULL outside a dungeon), the battle at +0x4778, and
+//   its state (Battle::GetState: the int at +0x248), 0 outside a battle. The raid already exists while
+//   its loading screen shows, so that is read too, like LoadingScreen::GetIsActive:
+//   LoadingScreen::s_Instance and the byte at +0x2cc (set by StartScreen, cleared by FinishScreen).
 #define TRINKETS_PANEL 0x2f70
 #define PANEL_STATE    0x38
-static char **town_display;   // &TownDisplay::s_Instance; NULL: no button
+#define RAID_BATTLE    0x4778
+#define BATTLE_STATE   0x248
+#define LOADING_ACTIVE 0x2cc
+static char **town_display;   // &TownDisplay::s_Instance; NULL: no Shift button
+static char **raid;           // &Raid::s_Instance; NULL: no walk buttons
+static char **loading;        // &LoadingScreen::s_Instance (set with raid)
 
-// finds TownDisplay::s_Instance in the game binary's symbols and checks the offsets above
-static void find_trinket_panel(void) {
+// finds TownDisplay::s_Instance, Raid::s_Instance and LoadingScreen::s_Instance in the game binary's
+// symbols and checks the offsets above
+static void find_game_state(void) {
     const char *base = getenv("DD_BASE_PATH");
     char path[1024];
     snprintf(path, sizeof path, "%sdarkest.bin.x86_64", base ? base : "./");
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     struct stat st;
     if (fd < 0 || fstat(fd, &st) != 0) {
-        LOG("no Shift button: cannot open %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons: cannot open %s: %s", path, strerror(errno));
         if (fd >= 0)
             close(fd);
         return;
@@ -242,7 +256,7 @@ static void find_trinket_panel(void) {
     const unsigned char *f = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (f == MAP_FAILED) {
-        LOG("no Shift button: cannot map %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons: cannot map %s: %s", path, strerror(errno));
         return;
     }
     // box64 runs this very file, so it is a valid ELF
@@ -255,7 +269,8 @@ static void find_trinket_panel(void) {
             symtab = &sh[i];
         else if (!strcmp(section_names + sh[i].sh_name, ".text"))
             text = &sh[i];
-    Elf64_Addr instance = 0, visible = 0, active = 0;
+    Elf64_Addr instance = 0, visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
+               loading_instance = 0, loading_active = 0;
     if (symtab && text) {
         const Elf64_Sym *sym = (const Elf64_Sym *)(f + symtab->sh_offset);
         const char *names = (const char *)f + sh[symtab->sh_link].sh_offset;
@@ -267,10 +282,23 @@ static void find_trinket_panel(void) {
                 visible = sym[i].st_value;
             else if (!strcmp(s, "_ZNK2UI5Panel4Base11GetIsActiveEv"))
                 active = sym[i].st_value;
+            else if (!strcmp(s, "_ZN4Raid10s_InstanceE"))
+                raid_instance = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK4Raid10IsInBattleEv"))
+                in_battle = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK6Battle8GetStateEv"))
+                battle_state = sym[i].st_value;
+            else if (!strcmp(s, "_ZN13LoadingScreen10s_InstanceE"))
+                loading_instance = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK13LoadingScreen11GetIsActiveEv"))
+                loading_active = sym[i].st_value;
         }
     }
-    static const unsigned char add_panel[] = { 0x48, 0x81, 0xc7, 0x70, 0x2f, 0x00, 0x00 };   // add $0x2f70,%rdi
-    static const unsigned char cmp_state[] = { 0x83, 0x7f, 0x38, 0x00 };                     // cmpl $0,0x38(%rdi)
+    static const unsigned char add_panel[] = { 0x48, 0x81, 0xc7, 0x70, 0x2f, 0x00, 0x00 };    // add $0x2f70,%rdi
+    static const unsigned char cmp_state[] = { 0x83, 0x7f, 0x38, 0x00 };                      // cmpl $0,0x38(%rdi)
+    static const unsigned char add_battle[] = { 0x48, 0x81, 0xc7, 0x78, 0x47, 0x00, 0x00 };   // add $0x4778,%rdi
+    static const unsigned char mov_state[] = { 0x8b, 0x87, 0x48, 0x02, 0x00, 0x00 };          // mov 0x248(%rdi),%eax
+    static const unsigned char movzb_loading[] = { 0x0f, 0xb6, 0x87, 0xcc, 0x02, 0x00, 0x00 };   // movzbl 0x2cc(%rdi),%eax
 #define CODE_IS(addr, bytes) ((addr) >= text->sh_addr && (addr) + sizeof bytes <= text->sh_addr + text->sh_size \
                               && !memcmp(f + text->sh_offset + ((addr) - text->sh_addr), bytes, sizeof bytes))
     if (!instance || !visible || !active)
@@ -281,26 +309,47 @@ static void find_trinket_panel(void) {
         town_display = (char **)instance;
         LOG("trinket inventory: TownDisplay::s_Instance at 0x%llx", (unsigned long long)instance);
     }
+    if (!raid_instance || !in_battle || !battle_state || !loading_instance || !loading_active)
+        LOG("no walk buttons: the game binary lacks the dungeon's symbols");
+    else if (!CODE_IS(in_battle + 1, add_battle) || !CODE_IS(battle_state, mov_state)   // +1: push %rax
+             || !CODE_IS(loading_active, movzb_loading))
+        LOG("no walk buttons: this game build keeps the battle or loading state elsewhere");
+    else {
+        raid = (char **)raid_instance;
+        loading = (char **)loading_instance;
+        LOG("dungeon: Raid::s_Instance at 0x%llx, LoadingScreen::s_Instance at 0x%llx",
+            (unsigned long long)raid_instance, (unsigned long long)loading_instance);
+    }
 #undef CODE_IS
     munmap((void *)f, st.st_size);
 }
 
-// tells the app when the trinket inventory opens or closes; at each swap, on the game's thread
-static void check_trinket_panel(void) {
-    static int looked, open;
+// tells the app when the trinket inventory opens or closes, and when the party can start or stop
+// walking (in a dungeon, outside a battle and its loading screen); at each swap, on the game's thread
+static void check_game_state(void) {
+    static int looked, open, walk;
     if (!looked) {
         looked = 1;
-        find_trinket_panel();
+        find_game_state();
     }
-    if (!town_display)
-        return;
-    char *town = *town_display;
-    int state = town ? *(int *)(town + TRINKETS_PANEL + PANEL_STATE) : 0;
-    int now = state >= 1 && state <= 4;
-    if (now != open) {
-        open = now;
-        LOG("trinket inventory %s", open ? "open" : "closed");
-        send_msg(DD_SHIFT_SCREEN, open, 0, 0, 0);
+    if (town_display) {
+        char *town = *town_display;
+        int state = town ? *(int *)(town + TRINKETS_PANEL + PANEL_STATE) : 0;
+        int now = state >= 1 && state <= 4;
+        if (now != open) {
+            open = now;
+            LOG("trinket inventory %s", open ? "open" : "closed");
+            send_msg(DD_SHIFT_SCREEN, open, 0, 0, 0);
+        }
+    }
+    if (raid) {
+        char *r = *raid, *l = *loading;
+        int now = r && *(int *)(r + RAID_BATTLE + BATTLE_STATE) == 0 && !(l && l[LOADING_ACTIVE]);
+        if (now != walk) {
+            walk = now;
+            LOG("walk buttons %s", walk ? "shown" : "hidden");
+            send_msg(DD_WALK_SCREEN, walk, 0, 0, 0);
+        }
     }
 }
 
@@ -455,7 +504,7 @@ int SDL_GL_GetSwapInterval(void) {
 
 void SDL_GL_SwapWindow(SDL_Window *window) {
     (void)window;
-    check_trinket_panel();
+    check_game_state();
     gl4es_pre_swap();
     // a free buffer, and the previous frame on screen (the app then holds only that one)
     int i = 0, need = DD_BUFFERS - 1;

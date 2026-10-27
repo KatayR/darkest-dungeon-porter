@@ -91,7 +91,8 @@ import java.util.zip.ZipOutputStream;
  * Touch works like a laptop trackpad: one finger moves the cursor, a tap clicks, a two-finger tap
  * right-clicks, tap then hold drags. Back sends Escape. While the game wants text, the keyboard is up
  * and types into it; hardware keyboards always reach the game. While the trinket inventory is open, a
- * Shift button holds Shift, which makes a click sell the trinket.
+ * Shift button holds Shift, which makes a click sell the trinket. In a dungeon outside a battle, two
+ * arrow buttons hold Left or Right, which walks the party.
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "DDActivity";
@@ -139,6 +140,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private float lastClickY, lowestClickY;   // when the game asked for text, 0 (top) to 1 (see panAboveKeyboard)
     private Button shiftButton; // over the game while the trinket inventory is open (see onShiftScreen)
     private boolean shiftHeld;  // the Shift button holds Shift down in the game
+    private Button walkLeft, walkRight;   // over the game while the party can walk (see onWalkScreen)
+    private int walkHeld;       // the arrow key's scancode a walk button holds down in the game, 0: none
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -552,6 +555,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         FrameLayout layout = new FrameLayout(this);
         layout.addView(view);
         layout.addView(shiftButton());   // over the game, not moved by panAboveKeyboard
+        layout.addView(walkLeft = walkButton("◀︎", KeyEvent.KEYCODE_DPAD_LEFT, Gravity.START));
+        layout.addView(walkRight = walkButton("▶︎", KeyEvent.KEYCODE_DPAD_RIGHT, Gravity.END));
         setContentView(layout);
         // the keyboard (and the bars that may show with it) cover the game rather than resizing it;
         // panAboveKeyboard moves it instead
@@ -653,6 +658,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     public void surfaceDestroyed(SurfaceHolder holder) {
         nativeSetSurface(null);
         holdShift(false);   // nothing stays held while the game is away
+        holdWalk(0);
     }
 
     // ---- input ----
@@ -894,6 +900,69 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             if (!open)
                 holdShift(false);
             shiftButton.setVisibility(open ? View.VISIBLE : View.GONE);
+        });
+    }
+
+    private static final float WALK_Y = 0.435f;   // of the screen height: the walk buttons' middle, beside the party
+    private static final int WALK_HELD = 0xFF4A4A53;   // a walk button while it holds its key
+
+    /**
+     * A walk button: the game walks the party while Left or Right (keyCode) is held, which touch can't
+     * do. It holds the key while it is touched. Like the Shift button, it keeps its own touches and
+     * never takes focus from the game view.
+     */
+    private Button walkButton(String arrow, int keyCode, int side) {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        Button b = button(c, arrow, BUTTON, TEXT);
+        b.setTextSize(22);
+        b.setAlpha(0.3f);
+        b.setFocusable(false);
+        b.setVisibility(View.GONE);
+        int key = scancode(keyCode);
+        b.setOnTouchListener((v, e) -> {
+            switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                holdWalk(key);
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                if (walkHeld == key)   // the other button may have taken over
+                    holdWalk(0);
+                break;
+            }
+            return true;
+        });
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(c, 56), dp(c, 94), side | Gravity.TOP);
+        lp.leftMargin = lp.rightMargin = dp(c, 8);
+        lp.topMargin = Math.round(getResources().getDisplayMetrics().heightPixels * WALK_Y) - lp.height / 2;
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** Holds an arrow key down in the game (its button turns lighter), releasing the one held before; 0 releases. */
+    private void holdWalk(int key) {
+        if (key == walkHeld)
+            return;
+        if (walkHeld != 0)
+            nativeKey(walkHeld, false);
+        walkHeld = key;
+        if (key != 0)
+            nativeKey(key, true);
+        int left = scancode(KeyEvent.KEYCODE_DPAD_LEFT);
+        walkLeft.setBackgroundTintList(ColorStateList.valueOf(key == left ? WALK_HELD : BUTTON));
+        walkRight.setBackgroundTintList(ColorStateList.valueOf(key != 0 && key != left ? WALK_HELD : BUTTON));
+    }
+
+    /**
+     * Called by ddview (on its render thread) when the party can start or stop walking: in a dungeon,
+     * outside a battle. A held arrow is released with it.
+     */
+    private void onWalkScreen(boolean on) {
+        handler.post(() -> {
+            if (!on)
+                holdWalk(0);
+            walkLeft.setVisibility(on ? View.VISIBLE : View.GONE);
+            walkRight.setVisibility(on ? View.VISIBLE : View.GONE);
         });
     }
 

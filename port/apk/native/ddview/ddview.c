@@ -3,7 +3,8 @@
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
 // Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
 // positions to the game. Tells the activity when the game wants text (it shows the keyboard) and
-// when the trinket inventory opens or closes (it shows the Shift button).
+// when the trinket inventory opens or closes (it shows the Shift button), and when the party can walk
+// (in a dungeon, outside a battle: it shows the walk buttons).
 // Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
 // here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
@@ -49,11 +50,11 @@ static float cursor_x, cursor_y;
 static int cursor_visible = 1, cursor_w, cursor_h, cursor_hx, cursor_hy, cursor_dirty;
 static unsigned char *cursor_pixels;
 
-// the activity, told when the game wants text (DD_TEXT_INPUT) and when the Shift button shows
-// (DD_SHIFT_SCREEN)
+// the activity, told when the game wants text (DD_TEXT_INPUT) and when the Shift button
+// (DD_SHIFT_SCREEN) and the walk buttons (DD_WALK_SCREEN) show
 static JavaVM *vm;
 static jobject activity;
-static jmethodID on_text_input, on_shift_screen;
+static jmethodID on_text_input, on_shift_screen, on_walk_screen;
 
 // recent left clicks (cursor height and time), to tell the activity where the text field may be
 #define CLICKS    16
@@ -290,6 +291,13 @@ static void shift_screen(int on) {
         (*env)->CallVoidMethod(env, activity, on_shift_screen, (jboolean)on);
 }
 
+// DDActivity.onWalkScreen(on), from the render thread
+static void walk_screen(int on) {
+    JNIEnv *env = java_env();
+    if (env)
+        (*env)->CallVoidMethod(env, activity, on_walk_screen, (jboolean)on);
+}
+
 static void handle(int fd) {
     dd_msg m;
     int fence;
@@ -350,6 +358,9 @@ static void handle(int fd) {
         break;
     case DD_SHIFT_SCREEN:
         shift_screen(m.a != 0);
+        break;
+    case DD_WALK_SCREEN:
+        walk_screen(m.a != 0);
         break;
     }
 }
@@ -441,6 +452,7 @@ Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jobject 
     activity = (*env)->NewGlobalRef(env, act);
     on_text_input = (*env)->GetMethodID(env, cls, "onTextInput", "(ZFF)V");
     on_shift_screen = (*env)->GetMethodID(env, cls, "onShiftScreen", "(Z)V");
+    on_walk_screen = (*env)->GetMethodID(env, cls, "onWalkScreen", "(Z)V");
     game_w = w;
     game_h = h;
     refreshes = frame_refreshes > 1 ? frame_refreshes : 1;
