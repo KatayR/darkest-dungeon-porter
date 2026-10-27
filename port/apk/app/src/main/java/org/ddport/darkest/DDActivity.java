@@ -5,6 +5,7 @@ import android.app.AlertDialog;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -264,8 +265,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             play.setBackgroundTintList(ColorStateList.valueOf(BUTTON));
             play.setTextColor(MUTED);
         }
-        LinearLayout bottom = column(c);
-        bottom.addView(play, wrap());
+        FrameLayout bottom = new FrameLayout(c);   // Play in the middle, the app's version at the left
+        bottom.addView(play, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        bottom.addView(text(c, "v" + versionName(), 12, MUTED), new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.START | Gravity.BOTTOM));
 
         LinearLayout layout = new LinearLayout(c);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -283,6 +288,15 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                     .setMessage(dialogMessage)
                     .setPositiveButton(android.R.string.ok, null)
                     .show();
+    }
+
+    /** The APK's versionName, as build.gradle sets it. */
+    private String versionName() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (PackageManager.NameNotFoundException e) {   // the running app's own package is always there
+            throw new IllegalStateException(e);
+        }
     }
 
     /** What is imported: the game (GOG's or Steam's) and its DLCs; empty while the game is missing. */
