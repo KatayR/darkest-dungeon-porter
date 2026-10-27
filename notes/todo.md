@@ -1222,3 +1222,4 @@ Asked: the Shift button should also show on the Provision screen (before embarki
 - The debug APK builds. On the OnePlus 5 (Steam 28212) the glue logged "provisions: ... the panel at +0x2888, its state at +0x38" next to the trinket and dungeon lines.
 - Asked next: zoom out hides the button (zoom in only shows it), the button's middle at 2/3 of the screen height (it was centred), and 25% taller. The extra height is a quarter of its visible height (the button's background has transparent insets above and below).
 - [x] The owner tested on the phone (adb can't pinch, and the Provision screen is a long walk through menus): "works".
+- [x] Release 0.4.8 (versionCode 12) with these, signed with the upload key and checked with `apksigner`.
