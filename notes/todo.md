@@ -1203,3 +1203,4 @@ Reported: two players on GOG build 26186 never see the Shift button. The owner f
 - The debug APK builds without warnings. On the OnePlus 5 (Steam 28212) the glue logged "the panel at +0x2f70, its state at +0x38" and "the battle at +0x4778, its state at +0x248 ... its flag at +0x2cc", the old constants.
 - [ ] Not tested: GOG 26186 on a phone. The installer comes from an unknown website, so it is never run or imported; it waits for a player on 26186 to confirm (the logcat line should show +0x2fe0).
 - From now on, anything read from the game binary is checked against all three builds (26186 statically only).
+- [x] Release 0.4.7 (versionCode 11) with the walk buttons and this fix, signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`.
