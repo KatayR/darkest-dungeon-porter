@@ -65,7 +65,8 @@ The touch screen works like a laptop trackpad:
 - **Two-finger tap** to right-click.
 - **Tap, then touch again and hold** to drag.
 - **Back** opens the game's Escape menu.
-- **Shift** (selling trinkets): while the trinket inventory is open, a Shift button shows at the left edge. Tap it to hold Shift (it turns amber), then tap a trinket to sell it. Shift is let go when the inventory closes.
+- **Shift** (selling trinkets): while the trinket inventory or the Provision screen is open, a Shift button shows at the left edge, two-thirds of the way down. Tap it to hold Shift (it turns amber), then tap a trinket to sell it. Shift is let go when they close.
+- **Pinch** anywhere in the game: zoom in (two fingers spreading apart) shows the Shift button, zoom out hides it.
 - **Walking**: in a dungeon outside battle, ◀ and ▶ buttons show at the left and right edges. Hold one to walk the party that way.
 
 A **game controller** (Bluetooth or USB) works as on PC, with the game's own button prompts. It can be connected or disconnected at any time. Rumble isn't supported. Tested with an Xbox Wireless Controller.

@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.input.InputManager;
@@ -90,8 +91,9 @@ import java.util.zip.ZipOutputStream;
  *
  * Touch works like a laptop trackpad: one finger moves the cursor, a tap clicks, a two-finger tap
  * right-clicks, tap then hold drags. Back sends Escape. While the game wants text, the keyboard is up
- * and types into it; hardware keyboards always reach the game. While the trinket inventory is open, a
- * Shift button holds Shift, which makes a click sell the trinket. In a dungeon outside a battle, two
+ * and types into it; hardware keyboards always reach the game. While the trinket inventory or the
+ * provisions are open, a Shift button holds Shift, which makes a click sell the trinket; anywhere,
+ * zoom in shows it and zoom out hides it. In a dungeon outside a battle, two
  * arrow buttons hold Left or Right, which walks the party.
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
@@ -665,10 +667,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final long TAP_MS = 200;       // longer than this is not a tap
     private static final float TAP_SLOP = 12;     // moving more than this (view pixels) is not a tap
     private static final float SPEED = 1.0f;      // cursor speed: game pixels per view pixel, scaled below
+    private static final float PINCH_DP = 64;     // two fingers moving this much further apart or closer: a pinch
     private float lastX, lastY, travel;
+    private float pinchStart;                     // how far apart two fingers were when the second went down
     private long downTime, lastTapUp;
     private int maxFingers;
-    private boolean dragging;
+    private boolean dragging, pinched;
 
     private boolean onTouch(MotionEvent e) {
         View v = getWindow().getDecorView();
@@ -679,6 +683,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             lastY = e.getY();
             travel = 0;
             maxFingers = 1;
+            pinched = false;
             downTime = e.getEventTime();
             // tap then touch again quickly: hold the button down and drag
             if (downTime - lastTapUp < TAP_MS) {
@@ -688,18 +693,23 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             break;
         case MotionEvent.ACTION_POINTER_DOWN:
             maxFingers = Math.max(maxFingers, e.getPointerCount());
+            if (e.getPointerCount() == 2)
+                pinchStart = spread(e);
             break;
         case MotionEvent.ACTION_MOVE:
             if (e.getPointerCount() == 1) {
                 float dx = e.getX() - lastX, dy = e.getY() - lastY;
                 travel += Math.abs(dx) + Math.abs(dy);
                 nativeMoveCursor(dx * scale, dy * scale);
+            } else if (!pinched && Math.abs(spread(e) - pinchStart) > dp(this, PINCH_DP)) {
+                pinched = true;                        // once per touch
+                showShiftButton(spread(e) > pinchStart);   // zoom in shows it, zoom out hides it
             }
             lastX = e.getX();
             lastY = e.getY();
             break;
         case MotionEvent.ACTION_UP:
-            boolean tap = e.getEventTime() - downTime < TAP_MS && travel < TAP_SLOP;
+            boolean tap = e.getEventTime() - downTime < TAP_MS && travel < TAP_SLOP && !pinched;
             if (dragging) {
                 dragging = false;
                 nativeButton(1, false);
@@ -720,6 +730,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             break;
         }
         return true;
+    }
+
+    /** How far apart the first two fingers are (view pixels). */
+    private static float spread(MotionEvent e) {
+        return (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
     }
 
     // Keys from hardware keyboards and from the on-screen keyboard. Held keys repeat: the game
@@ -860,6 +875,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         view.setTranslationY(textInput && keyboard > 0 ? -pan : 0);
     }
 
+    private static final float SHIFT_Y = 2 / 3f;        // of the screen height: the Shift button's middle
+    private static final float SHIFT_TALLER = 1.25f;   // the Shift button's height, of a normal button's
+
     /**
      * The Shift button: in the trinket inventory, the game sells the trinket clicked while Shift is
      * held. A tap holds Shift, the next releases it. It keeps its own touches (they don't move the
@@ -873,9 +891,16 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         shiftButton.setFocusable(false);
         shiftButton.setVisibility(View.GONE);
         shiftButton.setOnClickListener(b -> holdShift(!shiftHeld));
+        // SHIFT_TALLER times a normal button's visible height (its background has transparent insets)
+        shiftButton.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        int height = shiftButton.getMeasuredHeight();
+        Insets insets = shiftButton.getBackground().getOpticalInsets();
+        height += Math.round((height - insets.top - insets.bottom) * (SHIFT_TALLER - 1));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.START | Gravity.CENTER_VERTICAL);
+                height, Gravity.START | Gravity.CENTER_VERTICAL);
         lp.leftMargin = dp(c, 16);
+        // centred vertically, then moved down so its middle sits at SHIFT_Y
+        lp.topMargin = Math.round(getResources().getDisplayMetrics().heightPixels * (SHIFT_Y - 0.5f));
         shiftButton.setLayoutParams(lp);
         return shiftButton;
     }
@@ -891,16 +916,22 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Called by ddview (on its render thread) when the trinket inventory opens or closes. Shift is
-     * released with it, so it never stays held where Shift-click does something else (in a dungeon,
-     * it discards an item).
+     * Called by ddview (on its render thread) when the trinket inventory or the provisions open or
+     * close. Shift is released with them, so it never stays held where Shift-click does something else
+     * (in a dungeon, it discards an item).
      */
     private void onShiftScreen(boolean open) {
-        handler.post(() -> {
-            if (!open)
-                holdShift(false);
-            shiftButton.setVisibility(open ? View.VISIBLE : View.GONE);
-        });
+        handler.post(() -> showShiftButton(open));
+    }
+
+    /**
+     * Shows or hides the Shift button; hiding it releases Shift. Besides the game's panels, a pinch does
+     * this anywhere in the game: zoom in (two fingers spreading apart) shows it, zoom out hides it.
+     */
+    private void showShiftButton(boolean show) {
+        if (!show)
+            holdShift(false);
+        shiftButton.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
     private static final float WALK_Y = 0.435f;   // of the screen height: the walk buttons' middle, beside the party

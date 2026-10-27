@@ -1204,3 +1204,21 @@ Reported: two players on GOG build 26186 never see the Shift button. The owner f
 - [ ] Not tested: GOG 26186 on a phone. The installer comes from an unknown website, so it is never run or imported; it waits for a player on 26186 to confirm (the logcat line should show +0x2fe0).
 - From now on, anything read from the game binary is checked against all three builds (26186 statically only).
 - [x] Release 0.4.7 (versionCode 11) with the walk buttons and this fix, signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`.
+
+## Shift button on the Provision screen, and a pinch to show or hide it (2026-10-27)
+Asked: the Shift button should also show on the Provision screen (before embarking), and a pinch (zoom in) should show or hide it.
+
+**Findings (llvm-objdump, GOG 26186 / GOG 27988 / Steam 28212):**
+- `TownDisplay::GetIsProvisionSelectVisible` is `add $off,%rdi; jmp UI::Panel::Base::GetIsActive` in all three: the provision panel sits at +0x28d0 in 26186 and +0x2888 in 27988/28212, and its state is read like the trinket panel's.
+
+**Plan:**
+- [x] ddglue: also read the provision panel's offset from `GetIsProvisionSelectVisible` (same `code_offset`), checked and logged on its own; the Shift button shows while either panel is opening or open.
+- [x] DDActivity: two fingers spreading apart (zoom in) by more than 64 dp shows the Shift button if hidden and hides it (letting Shift go) if shown, once per gesture, anywhere in the game. Such a gesture is never a two-finger tap (no right-click). The game still shows or hides the button when the trinket inventory or the provisions open or close.
+- [x] Comments (ddglue, ddview, ddproto, DDActivity) and README Controls.
+- [x] Verify: the Python lookup reads the provision offset from all three builds; on the phone (Steam 28212) the button shows on the Provision screen, a pinch toggles it in the hamlet and the dungeon, and a two-finger tap still right-clicks.
+
+**Progress:**
+- On the PC, the Python lookup reads the provision panel at +0x28d0 from GOG 26186 (statically) and +0x2888 from GOG 27988 and Steam 28212; a wrong address or a changed opcode byte gives -1.
+- The debug APK builds. On the OnePlus 5 (Steam 28212) the glue logged "provisions: ... the panel at +0x2888, its state at +0x38" next to the trinket and dungeon lines.
+- Asked next: zoom out hides the button (zoom in only shows it), the button's middle at 2/3 of the screen height (it was centred), and 25% taller. The extra height is a quarter of its visible height (the button's background has transparent insets above and below).
+- [x] The owner tested on the phone (adb can't pinch, and the Provision screen is a long walk through menus): "works".

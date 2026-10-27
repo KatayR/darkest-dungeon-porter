@@ -3,8 +3,8 @@
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
 // Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
 // positions to the game. Tells the activity when the game wants text (it shows the keyboard) and
-// when the trinket inventory opens or closes (it shows the Shift button), and when the party can walk
-// (in a dungeon, outside a battle: it shows the walk buttons).
+// when the trinket inventory or the provisions open or close (it shows the Shift button), and when the
+// party can walk (in a dungeon, outside a battle: it shows the walk buttons).
 // Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
 // here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and

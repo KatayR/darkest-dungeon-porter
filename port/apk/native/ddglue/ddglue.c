@@ -18,8 +18,8 @@
 //   becomes SDL_TEXTINPUT plus a press of TEXT_KEY: the game's text fields insert the last text
 //   received only when a printable key goes down, one character per frame.
 // - Cursor: the game's colour cursors go to the app, which draws them over the frame.
-// - Shift screen: the app shows a Shift button while the trinket inventory is open (Shift-click sells
-//   there); the panel's state is read from the game's memory (see "the game's state" below).
+// - Shift screen: the app shows a Shift button while the trinket inventory (Shift-click sells there) or
+//   the provisions are open; the panels' state is read from the game's memory (see "the game's state").
 // - Walk screen: the app shows arrow buttons, which hold Left/Right, while the party is in a dungeon
 //   and not in a battle; read from the game's memory the same way.
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
@@ -222,10 +222,11 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
 // builds (GOG 26186 keeps the trinket panel at +0x2fe0, GOG 27988 and Steam 28212 at +0x2f70), so each
 // is taken from the instruction that uses it in the game's code; a build whose code there differs in
 // anything else never gets that button. The offsets below are those of 27988 and 28212.
-// - The trinket inventory (Shift button): the game sells a trinket on Shift-click while it is open,
-//   which touch can't do. Read like TownDisplay::GetIsRealmInventoryVisible: TownDisplay::s_Instance
-//   (NULL outside the hamlet), the panel at +0x2f70, and its state (UI::Panel::Base::GetIsActive: the
-//   int at +0x38): 0 closed, 1-4 opening or open, 5-7 closing.
+// - The trinket inventory and the provisions (Shift button): the game sells a trinket on Shift-click
+//   while the inventory is open, which touch can't do. Read like TownDisplay::GetIsRealmInventoryVisible
+//   and GetIsProvisionSelectVisible: TownDisplay::s_Instance (NULL outside the hamlet), the panel at
+//   +0x2f70 (provisions: +0x2888), and its state (UI::Panel::Base::GetIsActive: the int at +0x38):
+//   0 closed, 1-4 opening or open, 5-7 closing.
 // - Walking (arrow buttons): in a dungeon the party walks while Left or Right is held, outside a battle.
 //   Read like Raid::IsInBattle: Raid::s_Instance (NULL outside a dungeon), the battle at +0x4778, and
 //   its state (Battle::GetState: the int at +0x248), 0 outside a battle. The raid already exists while
@@ -234,7 +235,8 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
 static char **town_display;   // &TownDisplay::s_Instance; NULL: no Shift button
 static char **raid;           // &Raid::s_Instance; NULL: no walk buttons
 static char **loading;        // &LoadingScreen::s_Instance (set with raid)
-static long trinkets_state;   // the trinket panel's state in TownDisplay (panel + its state)
+static long trinkets_state;   // the trinket panel's state in TownDisplay (panel + its state); 0: none
+static long provisions_state;   // the provision panel's state in TownDisplay; 0: none
 static long battle_state_in_raid;   // the battle's state in Raid (battle + its state)
 static long loading_flag;     // the loading screen's active byte in LoadingScreen
 
@@ -283,7 +285,7 @@ static void find_game_state(void) {
             symtab = &sh[i];
         else if (!strcmp(section_names + sh[i].sh_name, ".text"))
             text = &sh[i];
-    Elf64_Addr instance = 0, visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
+    Elf64_Addr instance = 0, visible = 0, provisions_visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
                loading_instance = 0, loading_active = 0;
     if (symtab && text) {
         const Elf64_Sym *sym = (const Elf64_Sym *)(f + symtab->sh_offset);
@@ -294,6 +296,8 @@ static void find_game_state(void) {
                 instance = sym[i].st_value;
             else if (!strcmp(s, "_ZNK6TownUI6Screen11TownDisplay26GetIsRealmInventoryVisibleEb"))
                 visible = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK6TownUI6Screen11TownDisplay27GetIsProvisionSelectVisibleEv"))
+                provisions_visible = sym[i].st_value;
             else if (!strcmp(s, "_ZNK2UI5Panel4Base11GetIsActiveEv"))
                 active = sym[i].st_value;
             else if (!strcmp(s, "_ZN4Raid10s_InstanceE"))
@@ -310,15 +314,19 @@ static void find_game_state(void) {
     }
     // the instructions that read the state, with 27988's offsets (any offset matches)
     static const unsigned char add_panel[] = { 0x48, 0x81, 0xc7, 0x70, 0x2f, 0x00, 0x00 };    // add $0x2f70,%rdi
+    static const unsigned char add_provisions[] = { 0x48, 0x81, 0xc7, 0x88, 0x28, 0x00, 0x00 };   // add $0x2888,%rdi
     static const unsigned char cmp_state[] = { 0x83, 0x7f, 0x38, 0x00 };                      // cmpl $0,0x38(%rdi)
     static const unsigned char add_battle[] = { 0x48, 0x81, 0xc7, 0x78, 0x47, 0x00, 0x00 };   // add $0x4778,%rdi
     static const unsigned char mov_state[] = { 0x8b, 0x87, 0x48, 0x02, 0x00, 0x00 };          // mov 0x248(%rdi),%eax
     static const unsigned char movzb_loading[] = { 0x0f, 0xb6, 0x87, 0xcc, 0x02, 0x00, 0x00 };   // movzbl 0x2cc(%rdi),%eax
 #define CODE_OFFSET(addr, bytes, at, size) code_offset(f, text, addr, bytes, sizeof bytes, at, size)
-    long panel = -1, panel_state = -1, battle = -1, state = -1, flag = -1;
-    if (instance && visible && active) {
-        panel = CODE_OFFSET(visible + 8, add_panel, 3, 4);
+    long panel = -1, provisions = -1, panel_state = -1, battle = -1, state = -1, flag = -1;
+    if (instance && active) {
         panel_state = CODE_OFFSET(active, cmp_state, 2, 1);
+        if (visible)
+            panel = CODE_OFFSET(visible + 8, add_panel, 3, 4);
+        if (provisions_visible)
+            provisions = CODE_OFFSET(provisions_visible, add_provisions, 3, 4);
     }
     if (raid_instance && in_battle && battle_state && loading_instance && loading_active) {
         battle = CODE_OFFSET(in_battle + 1, add_battle, 3, 4);   // +1: push %rax
@@ -327,14 +335,24 @@ static void find_game_state(void) {
     }
 #undef CODE_OFFSET
     if (!instance || !visible || !active)
-        LOG("no Shift button: the game binary lacks the trinket inventory's symbols");
+        LOG("no Shift button in the trinket inventory: the game binary lacks its symbols");
     else if (panel < 0 || panel_state < 0)
-        LOG("no Shift button: this game build reads the trinket inventory differently");
+        LOG("no Shift button in the trinket inventory: this game build reads it differently");
     else {
         town_display = (char **)instance;
         trinkets_state = panel + panel_state;
         LOG("trinket inventory: TownDisplay::s_Instance at 0x%llx, the panel at +0x%lx, its state at +0x%lx",
             (unsigned long long)instance, panel, panel_state);
+    }
+    if (!instance || !provisions_visible || !active)
+        LOG("no Shift button in the provisions: the game binary lacks their symbols");
+    else if (provisions < 0 || panel_state < 0)
+        LOG("no Shift button in the provisions: this game build reads them differently");
+    else {
+        town_display = (char **)instance;
+        provisions_state = provisions + panel_state;
+        LOG("provisions: TownDisplay::s_Instance at 0x%llx, the panel at +0x%lx, its state at +0x%lx",
+            (unsigned long long)instance, provisions, panel_state);
     }
     if (!raid_instance || !in_battle || !battle_state || !loading_instance || !loading_active)
         LOG("no walk buttons: the game binary lacks the dungeon's symbols");
@@ -352,8 +370,15 @@ static void find_game_state(void) {
     munmap((void *)f, st.st_size);
 }
 
-// tells the app when the trinket inventory opens or closes, and when the party can start or stop
-// walking (in a dungeon, outside a battle and its loading screen); at each swap, on the game's thread
+// whether the panel whose state is at offset state in TownDisplay is opening or open (0: no such panel)
+static int panel_open(const char *town, long state) {
+    int s = state ? *(const int *)(town + state) : 0;
+    return s >= 1 && s <= 4;
+}
+
+// tells the app when the trinket inventory or the provisions open or close, and when the party can
+// start or stop walking (in a dungeon, outside a battle and its loading screen); at each swap, on the
+// game's thread
 static void check_game_state(void) {
     static int looked, open, walk;
     if (!looked) {
@@ -362,11 +387,10 @@ static void check_game_state(void) {
     }
     if (town_display) {
         char *town = *town_display;
-        int state = town ? *(int *)(town + trinkets_state) : 0;
-        int now = state >= 1 && state <= 4;
+        int now = town && (panel_open(town, trinkets_state) || panel_open(town, provisions_state));
         if (now != open) {
             open = now;
-            LOG("trinket inventory %s", open ? "open" : "closed");
+            LOG("Shift button %s", open ? "shown" : "hidden");
             send_msg(DD_SHIFT_SCREEN, open, 0, 0, 0);
         }
     }
