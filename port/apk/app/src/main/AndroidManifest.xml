@@ -27,5 +27,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- the log file a four-finger hold shares (DDActivity.sendLogs) -->
+        <provider
+            android:name=".LogProvider"
+            android:authorities="org.ddport.darkest.logs"
+            android:exported="false"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

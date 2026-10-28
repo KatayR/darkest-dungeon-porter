@@ -1223,3 +1223,15 @@ Asked: the Shift button should also show on the Provision screen (before embarki
 - Asked next: zoom out hides the button (zoom in only shows it), the button's middle at 2/3 of the screen height (it was centred), and 25% taller. The extra height is a quarter of its visible height (the button's background has transparent insets above and below).
 - [x] The owner tested on the phone (adb can't pinch, and the Provision screen is a long walk through menus): "works".
 - [x] Release 0.4.8 (versionCode 12) with these, signed with the upload key and checked with `apksigner`.
+
+## Logs without adb
+A player on a Pixel 10 Pro (GOG) gets a black screen with only the cursor, and can't run adb. Release builds aren't debuggable, so not even adb can read `dd.log` from them.
+
+**Plan:**
+- [x] Four fingers held for 2 s on the game screen write one text file in the cache folder: device, Android, SoC, game and screen size, refresh rate; this app's `logcat -d` (an app reads its own UID's logs without a permission, so both processes); the last 4 MB of `dd.log`.
+- [x] `LogProvider` serves that one file read-only, and the share sheet opens with it (`ACTION_SEND`, URI grant). Mail apps get the receiver (rasitarslan@outlook.com) and a subject with the version and phone model.
+- [x] README Controls and bug-report note.
+- [ ] Verify on a phone: the hold opens the share sheet, and Gmail attaches the file with the receiver and subject filled in.
+
+**Progress:**
+- The release APK builds, its manifest has the provider, and it is signed with the upload key (`963301da…3196934`). Installed on the A34 after uninstalling the debug-signed 0.4.6; the game still has to be imported there before the hold can be tried.

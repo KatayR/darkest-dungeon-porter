@@ -2,6 +2,7 @@ package org.ddport.darkest;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -12,6 +13,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.hardware.input.InputManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -44,11 +46,13 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -95,6 +99,7 @@ import java.util.zip.ZipOutputStream;
  * provisions are open, a Shift button holds Shift, which makes a click sell the trinket; anywhere,
  * zoom in shows it and zoom out hides it. In a dungeon outside a battle, two
  * arrow buttons hold Left or Right, which walks the party.
+ * Four fingers held share the logs (see sendLogs).
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String TAG = "DDActivity";
@@ -668,6 +673,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final float TAP_SLOP = 12;     // moving more than this (view pixels) is not a tap
     private static final float SPEED = 1.0f;      // cursor speed: game pixels per view pixel, scaled below
     private static final float PINCH_DP = 64;     // two fingers moving this much further apart or closer: a pinch
+    private static final long LOGS_HOLD_MS = 2000;   // four fingers held this long: send the logs
     private float lastX, lastY, travel;
     private float pinchStart;                     // how far apart two fingers were when the second went down
     private long downTime, lastTapUp;
@@ -695,6 +701,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             maxFingers = Math.max(maxFingers, e.getPointerCount());
             if (e.getPointerCount() == 2)
                 pinchStart = spread(e);
+            if (e.getPointerCount() == 4)
+                handler.postDelayed(sendLogs, LOGS_HOLD_MS);
             break;
         case MotionEvent.ACTION_MOVE:
             if (e.getPointerCount() == 1) {
@@ -709,7 +717,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             lastY = e.getY();
             break;
         case MotionEvent.ACTION_UP:
-            boolean tap = e.getEventTime() - downTime < TAP_MS && travel < TAP_SLOP && !pinched;
+            handler.removeCallbacks(sendLogs);
+            boolean tap =e.getEventTime() - downTime < TAP_MS && travel < TAP_SLOP && !pinched;
             if (dragging) {
                 dragging = false;
                 nativeButton(1, false);
@@ -723,10 +732,14 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             }
             break;
         case MotionEvent.ACTION_POINTER_UP:
+            handler.removeCallbacks(sendLogs);
             // a finger lifted: continue moving from wherever the remaining one is
             int keep = e.getActionIndex() == 0 ? 1 : 0;
             lastX = e.getX(keep);
             lastY = e.getY(keep);
+            break;
+        case MotionEvent.ACTION_CANCEL:
+            handler.removeCallbacks(sendLogs);
             break;
         }
         return true;
@@ -735,6 +748,61 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     /** How far apart the first two fingers are (view pixels). */
     private static float spread(MotionEvent e) {
         return (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
+    }
+
+    // ---- logs for bug reports ----
+    private static final long DD_LOG_MAX_BYTES = 4_000_000;   // of dd.log, the end is kept
+    private static final String LOGS_EMAIL = "rasitarslan@outlook.com";   // mail apps fill it in as the receiver
+
+    /**
+     * Four fingers held: write the device details, this app's logcat (both processes; an app reads
+     * only its own) and the game's dd.log into one file, and open the share sheet with it, so a
+     * report needs no adb.
+     */
+    private final Runnable sendLogs = () -> {
+        Toast.makeText(this, "Collecting logs…", Toast.LENGTH_SHORT).show();
+        String header = "Darkest Dungeon Porter " + versionName() + "\n"
+                + Build.MANUFACTURER + " " + Build.MODEL + " (" + Build.DEVICE + "), Android " + Build.VERSION.RELEASE
+                + " (API " + Build.VERSION.SDK_INT + "), SoC " + Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL + "\n"
+                + "Game " + gameW + "x" + gameH + ", screen " + getWindow().getDecorView().getWidth() + "x"
+                + getWindow().getDecorView().getHeight() + " at " + getDisplay().getRefreshRate() + " Hz\n";
+        new Thread(() -> {
+            try {
+                writeLogs(header, LogProvider.file(this));
+                handler.post(() -> {
+                    Intent send = new Intent(Intent.ACTION_SEND).setType("text/plain")
+                            .putExtra(Intent.EXTRA_STREAM, LogProvider.URI)
+                            .putExtra(Intent.EXTRA_EMAIL, new String[] { LOGS_EMAIL })
+                            .putExtra(Intent.EXTRA_SUBJECT, "Darkest Dungeon Porter " + versionName() + " logs, "
+                                    + Build.MANUFACTURER + " " + Build.MODEL)
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    send.setClipData(ClipData.newRawUri(LogProvider.NAME, LogProvider.URI));
+                    startActivity(Intent.createChooser(send, "Send the logs"));
+                });
+            } catch (Exception ex) {
+                Log.e(TAG, "cannot collect the logs", ex);
+                handler.post(() -> Toast.makeText(this, "Couldn't collect the logs: " + ex, Toast.LENGTH_LONG).show());
+            }
+        }).start();
+    };
+
+    private void writeLogs(String header, File out) throws Exception {
+        try (OutputStream os = new BufferedOutputStream(new FileOutputStream(out))) {
+            os.write(header.getBytes(StandardCharsets.UTF_8));
+            os.write("\n==== logcat ====\n".getBytes(StandardCharsets.UTF_8));
+            Process logcat = new ProcessBuilder("logcat", "-d", "-v", "threadtime").redirectErrorStream(true).start();
+            try (InputStream in = logcat.getInputStream()) {
+                copy(in, os);
+            }
+            logcat.waitFor();
+            File ddLog = new File(getFilesDir(), "dd.log");
+            os.write(("\n==== dd.log (" + ddLog.length() + " bytes) ====\n").getBytes(StandardCharsets.UTF_8));
+            if (ddLog.exists())
+                try (InputStream in = new FileInputStream(ddLog)) {
+                    in.skip(Math.max(0, ddLog.length() - DD_LOG_MAX_BYTES));
+                    copy(in, os);
+                }
+        }
     }
 
     // Keys from hardware keyboards and from the on-screen keyboard. Held keys repeat: the game
