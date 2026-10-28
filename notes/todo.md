@@ -1223,3 +1223,40 @@ Asked: the Shift button should also show on the Provision screen (before embarki
 - Asked next: zoom out hides the button (zoom in only shows it), the button's middle at 2/3 of the screen height (it was centred), and 25% taller. The extra height is a quarter of its visible height (the button's background has transparent insets above and below).
 - [x] The owner tested on the phone (adb can't pinch, and the Provision screen is a long walk through menus): "works".
 - [x] Release 0.4.8 (versionCode 12) with these, signed with the upload key and checked with `apksigner`.
+
+## Touch controls, picked on the game's Escape menu (2026-10-28)
+Asked: touch controls as an alternative to the trackpad, selectable on the game's Escape menu: when that menu shows, the port's control options show too.
+
+**Decided at check-in:**
+- In Touch mode the finger is the mouse: touching presses the left button where the finger is, sliding drags, lifting releases. A two-finger tap right-clicks; the pinch still shows or hides Shift.
+- A "Controls" card with Trackpad and Touch sits in the top-left corner while the menu shows. The choice is remembered.
+
+**What the game does** (llvm-objdump and Python; GOG 27988 and Steam 28212 have the same code here):
+- Six classes derive from `UI::Screen::Base` (found through their typeinfo): `TownUI::Screen::TownDisplay`, `RaidUI::Screen::RaidDisplay`, `RaidResultsUI::Screen::RaidResultsDisplay`, `FrontEndFlow::Screen::FrontEndDisplay`, `GameOverUI::Screen::GameOverDisplay` and `VideoScreen`. Each `Create()` sets its `s_Instance` to `new X` (the base at offset 0); `Destroy()` deletes it and sets it back to NULL.
+- The Escape menu is a `UI::Panel::Menu` in each screen: `UI::Screen::Base::IsMenuActive` is `add $0x708,%rdi` (`48 81 c7 08 07 00 00`), then `jmp UI::Panel::Base::GetIsActive` (the panel state at +0x38: 0 closed, 1–4 opening or open, 5–7 closing).
+- The menu's page: `UI::Panel::Menu::IsInChildPanelState` is `mov 0x60(%rdi),%eax; add $-2; cmp $3; setb` (`8b 47 60 83 c0 fe 83 f8 03`). `PreChildrenShowInternal` shows 0 = the main list (`ShowBase`), 1 = Options (`ShowOptions`), 2–4 = child panels over the main list. The card shows only on page 0, so it never covers Options or the child panels.
+- GOG 26186's installer is no longer on this PC, so it isn't checked this time.
+
+**Plan:**
+- [x] `ddproto.h`: `DD_MENU_SCREEN` (game → app, a=1 the Escape menu shows its main list / 0 it doesn't).
+- [x] ddglue: in the same lookup, the five other screens' `s_Instance`, `IsMenuActive` and `IsInChildPanelState`; the menu's offset and its page's offset are read from the code (`code_offset`), checked and logged on their own. At each swap: the menu shows when a screen exists, its menu panel is opening or open and the page is 0; send `DD_MENU_SCREEN` on a change, and log it.
+- [x] ddview: `DD_MENU_SCREEN` calls `DDActivity.onMenuScreen(boolean)`. New `nativeSetCursor(x, y)` (absolute, game pixels); it and `nativeMoveCursor` share one `move_cursor`.
+- [x] DDActivity:
+  - `touchMode` from the preferences (key `touch`, default trackpad); `onTouch` hands the event to `trackpad(e)` (today's code) or `touch(e)`.
+  - `touch(e)`: the cursor jumps to the finger. The left press waits until the finger moves past `TAP_SLOP`, stays down `TAP_MS` or lifts (then press and release together), so a second finger landing first makes a two-finger gesture (right click or pinch) with no stray left click. Once pressed, the cursor follows that finger, other fingers are ignored, and the button is released when it lifts or the gesture is cancelled.
+  - The card (heading "Controls", Trackpad and Touch side by side, the chosen one amber), at the top left, not focusable, shown by `onMenuScreen`. A held press is released on a switch and when the surface goes away.
+  - Found on the way: the trackpad's `onTouch` ignores `ACTION_CANCEL`, so a tap-then-hold drag the system cancels leaves the left button held. It now releases it too (approved with the plan).
+- [x] README Controls; the class comments.
+- [ ] Verify: the Python lookup on both builds; the natives and the APK build; on the phone, the card with the menu (hamlet, corridor, battle), not in Options, gone when the menu closes; Touch: instant `input tap` clicks, slide drags, two-finger tap right-clicks only, pinch, keyboard pan; Trackpad unchanged; the choice survives a restart.
+
+**Progress (PC only so far):**
+- A Python copy of the lookup finds the six screens' `s_Instance` and reads the menu at +0x708, its state at +0x38 and its page at +0x60 from GOG 27988 and Steam 28212. A wrong address, a changed byte outside the offset (`add $-3` in `IsInChildPanelState`) or an address outside `.text` gives -1.
+- `build-apk.sh` (debug) exits 0. `ddglue.c` and `ddview.c` compile with the build's flags plus `-Wall -Wextra` without warnings. The built `libddview.so` exports `nativeSetCursor` and names `onMenuScreen`; `libddglue.so` holds the new symbol names and log lines. `build-natives.sh` wasn't rerun: Box64 and gl4es didn't change, and the glue and ddview build in Gradle.
+- [ ] Not tested yet: everything on the phone (none was connected).
+- **GOG 26186** (the owner found its installer again; only the binary was copied out of its zip with Python's `zipfile` and read, nothing run): the Python lookup finds all six screens' `s_Instance` and reads the menu at **+0x728** (+0x708 in 27988/28212), its state at +0x38 and its page at +0x60; the failure cases give -1. Beyond the templates, llvm-objdump shows the same six classes derive from `UI::Screen::Base` (typeinfo, single inheritance), each `Create()`/`Destroy()` sets and clears its `s_Instance`, `IsMenuActive` jumps to `GetIsActive` (`cmpl $0,0x38(%rdi)`), and `PreChildrenShowInternal` uses the pages the same way (2–4 over `ShowBase`, 0 `ShowBase`, 1 `ShowOptions`). So the card should work there too; it waits for a player on 26186 to confirm (logcat: "the menu at +0x728").
+- **Changed after a look at the official tablet edition:** reviews say a tap acts there and a long press stands in for hover; there's no official write-up of its controls. In Touch mode, a two-finger tap became a **hold**: one finger held still for the system's long-press time (`ViewConfiguration.getLongPressTimeout()`, 400 ms by default) right-clicks under it, and the rest of that touch does nothing. A tap still clicks, sliding still presses where the finger touched and drags. A second finger that lands before either still makes it a pinch, with no click. The trackpad keeps its two-finger tap.
+- **Then asked: both right clicks, picked on the card.** Under Touch, the card shows "Right click" with **Hold** and **Two-finger tap** (only in touch mode), and under them the chosen way's pros and cons:
+  - Hold: "+ One finger does everything. − A tap held too long right-clicks."
+  - Two-finger tap: "+ Right-clicks at once. − Takes two fingers, and right-clicks under the one that touched first." (", and a long tap still clicks" was dropped on request.)
+  - Two-finger tap is the earlier behaviour: a finger held still for `TAP_MS` presses the left button, so a long tap is a click. Hold is the default; the choice is kept (key `holdRightClick`). The note wraps at the buttons' width rather than widening the card.
+- **Then asked: a "Show cursor" checkbox under Touch.** It sits right under Trackpad/Touch, above "Right click", on by default (key `touchCursor`). Unticked, ddview stops drawing the cursor (`nativeShowCursor`; drawn only when both the game and the app show it). The game still gets every move, so hover works the same. The trackpad always draws it.

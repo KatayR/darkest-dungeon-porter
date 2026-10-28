@@ -59,11 +59,23 @@ Saves are kept in the app's private storage, so uninstalling the app deletes the
 - Saves move between the Steam and GOG builds as they are: Windows Steam saves loaded on the phone with both.
 
 ## Controls
-The touch screen works like a laptop trackpad:
+The touch screen has two modes. While the game's Escape menu is open, a **Controls** card in the top-left corner switches between them, and the app remembers the choice.
+
+**Trackpad** (the default) works like a laptop trackpad:
 - **One finger** moves the cursor.
 - **Tap** to left-click.
 - **Two-finger tap** to right-click.
 - **Tap, then touch again and hold** to drag.
+
+**Touch** makes the finger the mouse, and the cursor jumps to it:
+- **Tap** to left-click.
+- **Slide** to drag from where the finger touched, and **lift** to let go.
+- **Right-click** one of two ways, picked on the Controls card under Touch:
+  - **Hold** (the default): hold the finger still. One finger does everything, but a tap held too long right-clicks.
+  - **Two-finger tap**: right-clicks at once, under the finger that touched first.
+- **Show cursor**, a checkbox on the card under Touch: untick it to hide the cursor, since the finger shows where it is. It's on by default.
+
+In both modes:
 - **Back** opens the game's Escape menu.
 - **Shift** (selling trinkets): while the trinket inventory or the Provision screen is open, a Shift button shows at the left edge, two-thirds of the way down. Tap it to hold Shift (it turns amber), then tap a trinket to sell it. Shift is let go when they close.
 - **Pinch** anywhere in the game: zoom in (two fingers spreading apart) shows the Shift button, zoom out hides it.

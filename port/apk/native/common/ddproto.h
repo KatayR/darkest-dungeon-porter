@@ -36,6 +36,8 @@ enum {
                       // (Shift button up) / 0 neither is
     DD_WALK_SCREEN,   // a=1 the party is in a dungeon and not in a battle, where Left/Right walk it
                       // (arrow buttons up) / 0 it isn't
+    DD_MENU_SCREEN,   // a=1 the game's Escape menu shows its main list (the controls card is up) / 0 it
+                      // doesn't
 };
 
 typedef struct {

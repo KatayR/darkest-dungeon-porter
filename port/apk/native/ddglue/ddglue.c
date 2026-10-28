@@ -22,6 +22,8 @@
 //   the provisions are open; the panels' state is read from the game's memory (see "the game's state").
 // - Walk screen: the app shows arrow buttons, which hold Left/Right, while the party is in a dungeon
 //   and not in a battle; read from the game's memory the same way.
+// - Menu screen: the app shows its controls card (trackpad or touch) while the game's Escape menu
+//   shows its main list; read from the game's memory the same way.
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
 // Protocol: ../common/ddproto.h.
@@ -216,7 +218,7 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
     if (h) *h = height;
 }
 
-// ---- the game's state (Shift and walk buttons) ----
+// ---- the game's state (Shift and walk buttons, controls card) ----
 // The game binary sits at its fixed addresses in this process and keeps its symbols, so the state
 // behind the app's buttons is read the way the game's own code reads it. The offsets differ between
 // builds (GOG 26186 keeps the trinket panel at +0x2fe0, GOG 27988 and Steam 28212 at +0x2f70), so each
@@ -232,13 +234,21 @@ void SDL_GetWindowSize(SDL_Window *window, int *w, int *h) {
 //   its state (Battle::GetState: the int at +0x248), 0 outside a battle. The raid already exists while
 //   its loading screen shows, so that is read too, like LoadingScreen::GetIsActive:
 //   LoadingScreen::s_Instance and the byte at +0x2cc (set by StartScreen, cleared by FinishScreen).
+// - The Escape menu (controls card): every screen (the six classes derived from UI::Screen::Base, each
+//   with an s_Instance that is NULL while it doesn't exist) has its menu panel at +0x708
+//   (UI::Screen::Base::IsMenuActive), with the panel state above. The menu's page is the int at +0x60
+//   (UI::Panel::Menu::IsInChildPanelState): 0 its main list, 1 Options, 2-4 panels over the main list.
+//   The card shows with the main list only, so it never covers the others.
 static char **town_display;   // &TownDisplay::s_Instance; NULL: no Shift button
 static char **raid;           // &Raid::s_Instance; NULL: no walk buttons
 static char **loading;        // &LoadingScreen::s_Instance (set with raid)
+static char **screens[6];     // each screen's &s_Instance; [0] NULL: no controls card
 static long trinkets_state;   // the trinket panel's state in TownDisplay (panel + its state); 0: none
 static long provisions_state;   // the provision panel's state in TownDisplay; 0: none
 static long battle_state_in_raid;   // the battle's state in Raid (battle + its state)
 static long loading_flag;     // the loading screen's active byte in LoadingScreen
+static long menu_state;       // the menu panel's state in a screen (menu + its state)
+static long menu_page;        // the menu's page in a screen (menu + its page)
 
 // the offset in the instruction at addr in the game's code, whose bytes are those of the template
 // except the offset's own (size bytes at at, little-endian); -1 if the code there differs
@@ -255,8 +265,8 @@ static long code_offset(const unsigned char *f, const Elf64_Shdr *text, Elf64_Ad
     return offset;
 }
 
-// finds TownDisplay::s_Instance, Raid::s_Instance and LoadingScreen::s_Instance in the game binary's
-// symbols and reads the offsets above from the game's code
+// finds TownDisplay::s_Instance, Raid::s_Instance, LoadingScreen::s_Instance and the screens' s_Instance
+// in the game binary's symbols and reads the offsets above from the game's code
 static void find_game_state(void) {
     const char *base = getenv("DD_BASE_PATH");
     char path[1024];
@@ -264,7 +274,7 @@ static void find_game_state(void) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     struct stat st;
     if (fd < 0 || fstat(fd, &st) != 0) {
-        LOG("no Shift or walk buttons: cannot open %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons or controls card: cannot open %s: %s", path, strerror(errno));
         if (fd >= 0)
             close(fd);
         return;
@@ -272,7 +282,7 @@ static void find_game_state(void) {
     const unsigned char *f = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (f == MAP_FAILED) {
-        LOG("no Shift or walk buttons: cannot map %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons or controls card: cannot map %s: %s", path, strerror(errno));
         return;
     }
     // box64 runs this very file, so it is a valid ELF
@@ -286,12 +296,23 @@ static void find_game_state(void) {
         else if (!strcmp(section_names + sh[i].sh_name, ".text"))
             text = &sh[i];
     Elf64_Addr instance = 0, visible = 0, provisions_visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
-               loading_instance = 0, loading_active = 0;
+               loading_instance = 0, loading_active = 0, menu_active = 0, child_page = 0;
+    // the screens with an Escape menu, in the order of screens[]
+    static const char *const screen_names[] = {
+        "_ZN6TownUI6Screen11TownDisplay10s_InstanceE", "_ZN6RaidUI6Screen11RaidDisplay10s_InstanceE",
+        "_ZN13RaidResultsUI6Screen18RaidResultsDisplay10s_InstanceE",
+        "_ZN12FrontEndFlow6Screen15FrontEndDisplay10s_InstanceE",
+        "_ZN10GameOverUI6Screen15GameOverDisplay10s_InstanceE", "_ZN11VideoScreen10s_InstanceE",
+    };
+    Elf64_Addr screen_instance[sizeof screens / sizeof *screens] = { 0 };
     if (symtab && text) {
         const Elf64_Sym *sym = (const Elf64_Sym *)(f + symtab->sh_offset);
         const char *names = (const char *)f + sh[symtab->sh_link].sh_offset;
         for (size_t i = 0; i < symtab->sh_size / sizeof *sym; i++) {
             const char *s = names + sym[i].st_name;
+            for (size_t k = 0; k < sizeof screens / sizeof *screens; k++)
+                if (!strcmp(s, screen_names[k]))
+                    screen_instance[k] = sym[i].st_value;
             if (!strcmp(s, "_ZN6TownUI6Screen11TownDisplay10s_InstanceE"))
                 instance = sym[i].st_value;
             else if (!strcmp(s, "_ZNK6TownUI6Screen11TownDisplay26GetIsRealmInventoryVisibleEb"))
@@ -310,6 +331,10 @@ static void find_game_state(void) {
                 loading_instance = sym[i].st_value;
             else if (!strcmp(s, "_ZNK13LoadingScreen11GetIsActiveEv"))
                 loading_active = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK2UI6Screen4Base12IsMenuActiveEv"))
+                menu_active = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK2UI5Panel4Menu19IsInChildPanelStateEv"))
+                child_page = sym[i].st_value;
         }
     }
     // the instructions that read the state, with 27988's offsets (any offset matches)
@@ -319,21 +344,30 @@ static void find_game_state(void) {
     static const unsigned char add_battle[] = { 0x48, 0x81, 0xc7, 0x78, 0x47, 0x00, 0x00 };   // add $0x4778,%rdi
     static const unsigned char mov_state[] = { 0x8b, 0x87, 0x48, 0x02, 0x00, 0x00 };          // mov 0x248(%rdi),%eax
     static const unsigned char movzb_loading[] = { 0x0f, 0xb6, 0x87, 0xcc, 0x02, 0x00, 0x00 };   // movzbl 0x2cc(%rdi),%eax
+    static const unsigned char add_menu[] = { 0x48, 0x81, 0xc7, 0x08, 0x07, 0x00, 0x00 };     // add $0x708,%rdi
+    // mov 0x60(%rdi),%eax; add $-2,%eax; cmp $3,%eax (pages 2-4 are the panels over the main list)
+    static const unsigned char mov_page[] = { 0x8b, 0x47, 0x60, 0x83, 0xc0, 0xfe, 0x83, 0xf8, 0x03 };
 #define CODE_OFFSET(addr, bytes, at, size) code_offset(f, text, addr, bytes, sizeof bytes, at, size)
-    long panel = -1, provisions = -1, panel_state = -1, battle = -1, state = -1, flag = -1;
-    if (instance && active) {
+    long panel = -1, provisions = -1, panel_state = -1, battle = -1, state = -1, flag = -1, menu = -1, page = -1;
+    if (active)
         panel_state = CODE_OFFSET(active, cmp_state, 2, 1);
-        if (visible)
-            panel = CODE_OFFSET(visible + 8, add_panel, 3, 4);
-        if (provisions_visible)
-            provisions = CODE_OFFSET(provisions_visible, add_provisions, 3, 4);
-    }
+    if (instance && visible)
+        panel = CODE_OFFSET(visible + 8, add_panel, 3, 4);
+    if (instance && provisions_visible)
+        provisions = CODE_OFFSET(provisions_visible, add_provisions, 3, 4);
     if (raid_instance && in_battle && battle_state && loading_instance && loading_active) {
         battle = CODE_OFFSET(in_battle + 1, add_battle, 3, 4);   // +1: push %rax
         state = CODE_OFFSET(battle_state, mov_state, 2, 4);
         flag = CODE_OFFSET(loading_active, movzb_loading, 3, 4);
     }
+    if (menu_active && child_page) {
+        menu = CODE_OFFSET(menu_active, add_menu, 3, 4);
+        page = CODE_OFFSET(child_page, mov_page, 2, 1);
+    }
 #undef CODE_OFFSET
+    int all_screens = 1;
+    for (size_t k = 0; k < sizeof screens / sizeof *screens; k++)
+        all_screens &= screen_instance[k] != 0;
     if (!instance || !visible || !active)
         LOG("no Shift button in the trinket inventory: the game binary lacks its symbols");
     else if (panel < 0 || panel_state < 0)
@@ -367,20 +401,35 @@ static void find_game_state(void) {
             "LoadingScreen::s_Instance at 0x%llx, its flag at +0x%lx",
             (unsigned long long)raid_instance, battle, state, (unsigned long long)loading_instance, flag);
     }
+    if (!all_screens || !menu_active || !child_page || !active)
+        LOG("no controls card: the game binary lacks the Escape menu's symbols");
+    else if (menu < 0 || page < 0 || panel_state < 0)
+        LOG("no controls card: this game build reads the Escape menu differently");
+    else {
+        for (size_t k = 0; k < sizeof screens / sizeof *screens; k++)
+            screens[k] = (char **)screen_instance[k];
+        menu_state = menu + panel_state;
+        menu_page = menu + page;
+        LOG("Escape menu: the screens' s_Instance at 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx 0x%llx, the menu at "
+            "+0x%lx, its state at +0x%lx, its page at +0x%lx",
+            (unsigned long long)screen_instance[0], (unsigned long long)screen_instance[1],
+            (unsigned long long)screen_instance[2], (unsigned long long)screen_instance[3],
+            (unsigned long long)screen_instance[4], (unsigned long long)screen_instance[5], menu, panel_state, page);
+    }
     munmap((void *)f, st.st_size);
 }
 
-// whether the panel whose state is at offset state in TownDisplay is opening or open (0: no such panel)
-static int panel_open(const char *town, long state) {
-    int s = state ? *(const int *)(town + state) : 0;
+// whether the panel whose state is at offset state in a screen is opening or open (0: no such panel)
+static int panel_open(const char *screen, long state) {
+    int s = state ? *(const int *)(screen + state) : 0;
     return s >= 1 && s <= 4;
 }
 
-// tells the app when the trinket inventory or the provisions open or close, and when the party can
-// start or stop walking (in a dungeon, outside a battle and its loading screen); at each swap, on the
-// game's thread
+// tells the app when the trinket inventory or the provisions open or close, when the party can start or
+// stop walking (in a dungeon, outside a battle and its loading screen), and when the Escape menu's main
+// list shows or goes; at each swap, on the game's thread
 static void check_game_state(void) {
-    static int looked, open, walk;
+    static int looked, open, walk, menu;
     if (!looked) {
         looked = 1;
         find_game_state();
@@ -401,6 +450,18 @@ static void check_game_state(void) {
             walk = now;
             LOG("walk buttons %s", walk ? "shown" : "hidden");
             send_msg(DD_WALK_SCREEN, walk, 0, 0, 0);
+        }
+    }
+    if (screens[0]) {
+        int now = 0;
+        for (size_t k = 0; k < sizeof screens / sizeof *screens && !now; k++) {
+            char *s = *screens[k];
+            now = s && panel_open(s, menu_state) && *(int *)(s + menu_page) == 0;
+        }
+        if (now != menu) {
+            menu = now;
+            LOG("controls card %s", menu ? "shown" : "hidden");
+            send_msg(DD_MENU_SCREEN, menu, 0, 0, 0);
         }
     }
 }

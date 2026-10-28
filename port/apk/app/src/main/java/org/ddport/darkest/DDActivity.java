@@ -28,6 +28,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -38,6 +39,7 @@ import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
@@ -89,8 +91,12 @@ import java.util.zip.ZipOutputStream;
  * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
  * extras "height" and "fps" skip it.
  *
- * Touch works like a laptop trackpad: one finger moves the cursor, a tap clicks, a two-finger tap
- * right-clicks, tap then hold drags. Back sends Escape. While the game wants text, the keyboard is up
+ * Touch works like a laptop trackpad by default: one finger moves the cursor, a tap clicks, a
+ * two-finger tap right-clicks, tap then hold drags. In touch mode the finger is the mouse instead:
+ * a tap clicks where it lands, sliding drags from where the finger touched, and holding it still or a
+ * two-finger tap right-clicks. While the game's Escape menu shows its main list, a card picks between
+ * the two modes and, in touch mode, whether the cursor shows and which right click counts (the choices
+ * are kept). Back sends Escape. While the game wants text, the keyboard is up
  * and types into it; hardware keyboards always reach the game. While the trinket inventory or the
  * provisions are open, a Shift button holds Shift, which makes a click sell the trinket; anywhere,
  * zoom in shows it and zoom out hides it. In a dungeon outside a battle, two
@@ -127,6 +133,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                                           int frameRefreshes);
     private static native void nativeSetSurface(Object surface);
     private static native void nativeMoveCursor(float dx, float dy);
+    private static native void nativeSetCursor(float x, float y);
+    private static native void nativeShowCursor(boolean show);
     private static native void nativeButton(int button, boolean down);
     private static native void nativeKey(int scancode, boolean down);
     private static native void nativeText(int codePoint);
@@ -144,6 +152,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private boolean shiftHeld;  // the Shift button holds Shift down in the game
     private Button walkLeft, walkRight;   // over the game while the party can walk (see onWalkScreen)
     private int walkHeld;       // the arrow key's scancode a walk button holds down in the game, 0: none
+    private boolean touchMode;  // the finger is the mouse (see touch), not a trackpad (see trackpad)
+    private boolean holdRightClick;   // touch mode: a finger held still right-clicks, not a two-finger tap
+    private boolean touchCursor;      // touch mode: the cursor is drawn (the trackpad always draws it)
+    private View controlsCard;  // over the game while its Escape menu shows its main list (see onMenuScreen)
+    private Button trackpadButton, touchButton, holdButton, twoFingerButton;   // on the card: chosen ones amber
+    private View touchOptions;  // on the card in touch mode: the cursor and how to right-click
+    private TextView rightClickNote;   // under it: the chosen way's pros and cons
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -550,6 +565,10 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private void start(int height, int fps) {
         gameH = height;
         gameW = height * 16 / 9;
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        touchMode = prefs.getBoolean("touch", false);
+        holdRightClick = prefs.getBoolean("holdRightClick", true);
+        touchCursor = prefs.getBoolean("touchCursor", true);
         view = new GameView(this);
         view.getHolder().setFixedSize(gameW, gameH);
         view.getHolder().addCallback(this);
@@ -559,6 +578,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         layout.addView(shiftButton());   // over the game, not moved by panAboveKeyboard
         layout.addView(walkLeft = walkButton("◀︎", KeyEvent.KEYCODE_DPAD_LEFT, Gravity.START));
         layout.addView(walkRight = walkButton("▶︎", KeyEvent.KEYCODE_DPAD_RIGHT, Gravity.END));
+        layout.addView(controlsCard());
         setContentView(layout);
         // the keyboard (and the bars that may show with it) cover the game rather than resizing it;
         // panAboveKeyboard moves it instead
@@ -576,6 +596,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             Log.e(TAG, "cannot start the frame receiver");
             return;
         }
+        nativeShowCursor(!touchMode || touchCursor);
         inputManager = getSystemService(InputManager.class);
         inputManager.registerInputDeviceListener(padListener, handler);
         checkPads();
@@ -661,6 +682,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         nativeSetSurface(null);
         holdShift(false);   // nothing stays held while the game is away
         holdWalk(0);
+        releaseMouse();
     }
 
     // ---- input ----
@@ -672,19 +694,39 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private float pinchStart;                     // how far apart two fingers were when the second went down
     private long downTime, lastTapUp;
     private int maxFingers;
-    private boolean dragging, pinched;
+    private int finger;                           // touch mode: the pointer id of the first finger down
+    private boolean dragging;                     // touch holds the left button down (see releaseMouse)
+    private boolean pressDue;                     // touch mode: the first finger is down alone, not pressed yet
+    private boolean pinched;
+    private final Runnable held = () -> {         // touch mode: the finger stayed down, still (see touch)
+        if (!pressDue)
+            return;
+        if (holdRightClick) {
+            pressDue = false;                     // the rest of this touch does nothing
+            nativeButton(3, true);                // a right click
+            nativeButton(3, false);               // the game side keeps it pressed long enough
+        } else
+            press();
+    };
 
     private boolean onTouch(MotionEvent e) {
+        if (touchMode)
+            touch(e);
+        else
+            trackpad(e);
+        return true;
+    }
+
+    /**
+     * Trackpad mode: one finger moves the cursor, a tap clicks, a two-finger tap right-clicks, tap then
+     * hold drags.
+     */
+    private void trackpad(MotionEvent e) {
         View v = getWindow().getDecorView();
         float scale = SPEED * gameW / Math.max(1, v.getWidth());
         switch (e.getActionMasked()) {
         case MotionEvent.ACTION_DOWN:
-            lastX = e.getX();
-            lastY = e.getY();
-            travel = 0;
-            maxFingers = 1;
-            pinched = false;
-            downTime = e.getEventTime();
+            touchStarts(e);
             // tap then touch again quickly: hold the button down and drag
             if (downTime - lastTapUp < TAP_MS) {
                 dragging = true;
@@ -692,19 +734,15 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             }
             break;
         case MotionEvent.ACTION_POINTER_DOWN:
-            maxFingers = Math.max(maxFingers, e.getPointerCount());
-            if (e.getPointerCount() == 2)
-                pinchStart = spread(e);
+            fingerAdded(e);
             break;
         case MotionEvent.ACTION_MOVE:
             if (e.getPointerCount() == 1) {
                 float dx = e.getX() - lastX, dy = e.getY() - lastY;
                 travel += Math.abs(dx) + Math.abs(dy);
                 nativeMoveCursor(dx * scale, dy * scale);
-            } else if (!pinched && Math.abs(spread(e) - pinchStart) > dp(this, PINCH_DP)) {
-                pinched = true;                        // once per touch
-                showShiftButton(spread(e) > pinchStart);   // zoom in shows it, zoom out hides it
-            }
+            } else
+                pinch(e);
             lastX = e.getX();
             lastY = e.getY();
             break;
@@ -728,13 +766,126 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             lastX = e.getX(keep);
             lastY = e.getY(keep);
             break;
+        case MotionEvent.ACTION_CANCEL:
+            releaseMouse();
+            break;
         }
-        return true;
+    }
+
+    /**
+     * Touch mode: the finger is the mouse. The cursor goes under it; a tap clicks, and sliding presses
+     * the left button where the finger touched and drags until it lifts. A right click is, as picked on
+     * the controls card, either the finger held still for a long press (the system's long-press time) or
+     * a two-finger tap; with two-finger taps, a finger held still for TAP_MS presses the left button
+     * instead. So the press waits until the finger moves, lifts or is held, and a second finger that
+     * lands first makes a two-finger gesture (right click or pinch), with no left click.
+     */
+    private void touch(MotionEvent e) {
+        switch (e.getActionMasked()) {
+        case MotionEvent.ACTION_DOWN:
+            touchStarts(e);
+            finger = e.getPointerId(0);
+            cursorTo(e, 0);
+            pressDue = true;
+            handler.postDelayed(held, holdRightClick ? ViewConfiguration.getLongPressTimeout() : TAP_MS);
+            break;
+        case MotionEvent.ACTION_POINTER_DOWN:
+            if (pressDue)
+                releaseMouse();                        // not a click: a two-finger gesture
+            fingerAdded(e);
+            break;
+        case MotionEvent.ACTION_MOVE:
+            int i = e.findPointerIndex(finger);
+            if (dragging && i >= 0) {
+                cursorTo(e, i);                        // only the pressing finger moves the mouse
+            } else if (pressDue) {
+                travel += Math.abs(e.getX() - lastX) + Math.abs(e.getY() - lastY);
+                if (travel >= TAP_SLOP)
+                    press();                           // where the finger was, before it moves on
+                cursorTo(e, 0);
+            } else if (!dragging && e.getPointerCount() >= 2)
+                pinch(e);
+            lastX = e.getX();
+            lastY = e.getY();
+            break;
+        case MotionEvent.ACTION_POINTER_UP:
+            if (e.getPointerId(e.getActionIndex()) == finger)
+                releaseMouse();                        // the pressing finger lifted; the others do nothing
+            break;
+        case MotionEvent.ACTION_UP:
+            boolean tap = e.getEventTime() - downTime < TAP_MS && travel < TAP_SLOP && !pinched;
+            boolean clicked = pressDue || dragging;
+            if (pressDue)
+                press();                               // a tap: a click
+            if (clicked)
+                releaseMouse();                        // the game side keeps it pressed long enough
+            else if (tap && maxFingers >= 2 && !holdRightClick) {
+                nativeButton(3, true);                 // two-finger tap = right click
+                nativeButton(3, false);
+            }
+            if (clicked && textInput)
+                showKeyboard(true);                    // back after Back hid it
+            break;
+        case MotionEvent.ACTION_CANCEL:
+            releaseMouse();
+            break;
+        }
+    }
+
+    /** The first finger touches: a new gesture. */
+    private void touchStarts(MotionEvent e) {
+        lastX = e.getX();
+        lastY = e.getY();
+        travel = 0;
+        maxFingers = 1;
+        pinched = false;
+        downTime = e.getEventTime();
+    }
+
+    /** Another finger touches. */
+    private void fingerAdded(MotionEvent e) {
+        maxFingers = Math.max(maxFingers, e.getPointerCount());
+        if (e.getPointerCount() == 2)
+            pinchStart = spread(e);
+    }
+
+    /** Two fingers moved apart or together: zoom in shows the Shift button, zoom out hides it, once per touch. */
+    private void pinch(MotionEvent e) {
+        if (!pinched && Math.abs(spread(e) - pinchStart) > dp(this, PINCH_DP)) {
+            pinched = true;
+            showShiftButton(spread(e) > pinchStart);
+        }
     }
 
     /** How far apart the first two fingers are (view pixels). */
     private static float spread(MotionEvent e) {
         return (float) Math.hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0));
+    }
+
+    /** Touch mode: the cursor goes under pointer i. */
+    private void cursorTo(MotionEvent e, int i) {
+        nativeSetCursor(e.getX(i) * gameW / view.getWidth(), e.getY(i) * gameH / view.getHeight());
+    }
+
+    /** Touch mode: the waiting press goes to the game, where the cursor is. */
+    private void press() {
+        handler.removeCallbacks(held);
+        pressDue = false;
+        dragging = true;
+        nativeButton(1, true);
+    }
+
+    /**
+     * Lets go of the left button if touch holds it (a trackpad drag, a touch-mode press), and drops a
+     * touch-mode press not sent yet.
+     */
+    private void releaseMouse() {
+        handler.removeCallbacks(held);
+        pressDue = false;
+        if (dragging) {
+            dragging = false;
+            nativeButton(1, false);
+        }
     }
 
     // Keys from hardware keyboards and from the on-screen keyboard. Held keys repeat: the game
@@ -995,6 +1146,112 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             walkLeft.setVisibility(on ? View.VISIBLE : View.GONE);
             walkRight.setVisibility(on ? View.VISIBLE : View.GONE);
         });
+    }
+
+    // the pros and cons of each way to right-click in touch mode, under its buttons on the controls card
+    private static final String HOLD_NOTE = "+ One finger does everything.\n"
+            + "− A tap held too long right-clicks.";
+    private static final String TWO_FINGER_NOTE = "+ Right-clicks at once.\n"
+            + "− Takes two fingers, and right-clicks under the one that touched first.";
+
+    /**
+     * The controls card, in the top-left corner while the game's Escape menu shows its main list:
+     * Trackpad or Touch (see onTouch) and, in touch mode, whether the cursor shows and how to
+     * right-click, with that way's pros and cons. Like the Shift button, it keeps its own touches (also
+     * between its buttons) and never takes focus from the game view.
+     */
+    private View controlsCard() {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        LinearLayout card = card(c);
+        card.setBackground(rounded(c));
+        card.setVisibility(View.GONE);
+        card.setOnTouchListener((v, e) -> true);
+        card.addView(heading(c, "Controls"));
+        LinearLayout modes = new LinearLayout(c);
+        modes.addView(trackpadButton = controlsButton(c, "Trackpad", v -> setTouchMode(false)));
+        modes.addView(touchButton = controlsButton(c, "Touch", v -> setTouchMode(true)));
+        card.addView(modes, below(c, 4));
+        LinearLayout ways = new LinearLayout(c);
+        ways.addView(holdButton = controlsButton(c, "Hold", v -> setHoldRightClick(true)));
+        ways.addView(twoFingerButton = controlsButton(c, "Two-finger tap", v -> setHoldRightClick(false)));
+        CheckBox cursor = new CheckBox(c);
+        cursor.setText("Show cursor");
+        cursor.setTextSize(16);
+        cursor.setTextColor(TEXT);
+        cursor.setButtonTintList(ColorStateList.valueOf(ACCENT));
+        cursor.setFocusable(false);
+        cursor.setChecked(touchCursor);
+        cursor.setOnCheckedChangeListener((b, checked) -> setTouchCursor(checked));
+        LinearLayout touch = new LinearLayout(c);
+        touch.setOrientation(LinearLayout.VERTICAL);
+        touch.addView(cursor);
+        touch.addView(text(c, "Right click", 14, MUTED), below(c, 8));
+        touch.addView(ways, below(c, 4));
+        rightClickNote = text(c, "", 14, MUTED);
+        // the note wraps within the buttons' width rather than widening the card
+        modes.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        ways.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
+        rightClickNote.setMaxWidth(Math.max(modes.getMeasuredWidth(), ways.getMeasuredWidth()));
+        touch.addView(rightClickNote, below(c, 8));
+        card.addView(touchOptions = touch, below(c, 8));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+        lp.leftMargin = lp.topMargin = dp(c, 16);
+        card.setLayoutParams(lp);
+        showControls();
+        return controlsCard = card;
+    }
+
+    private Button controlsButton(Context c, String text, View.OnClickListener click) {
+        Button b = button(c, text, BUTTON, TEXT);
+        b.setMinWidth(dp(c, 112));
+        b.setFocusable(false);
+        b.setOnClickListener(click);
+        return b;
+    }
+
+    /** Picks touch mode (true) or the trackpad and keeps the choice; nothing the other mode held stays held. */
+    private void setTouchMode(boolean touch) {
+        releaseMouse();
+        touchMode = touch;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("touch", touch).apply();
+        nativeShowCursor(!touchMode || touchCursor);
+        showControls();
+    }
+
+    /** Touch mode: shows the cursor (true) or hides it, and keeps the choice. */
+    private void setTouchCursor(boolean show) {
+        touchCursor = show;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("touchCursor", show).apply();
+        nativeShowCursor(!touchMode || touchCursor);
+    }
+
+    /** Touch mode: picks a held finger (true) or a two-finger tap to right-click, and keeps the choice. */
+    private void setHoldRightClick(boolean hold) {
+        releaseMouse();
+        holdRightClick = hold;
+        getPreferences(MODE_PRIVATE).edit().putBoolean("holdRightClick", hold).apply();
+        showControls();
+    }
+
+    /** The chosen buttons are amber; the cursor and right-click choices show in touch mode only. */
+    private void showControls() {
+        showChosen(trackpadButton, !touchMode);
+        showChosen(touchButton, touchMode);
+        showChosen(holdButton, holdRightClick);
+        showChosen(twoFingerButton, !holdRightClick);
+        rightClickNote.setText(holdRightClick ? HOLD_NOTE : TWO_FINGER_NOTE);
+        touchOptions.setVisibility(touchMode ? View.VISIBLE : View.GONE);
+    }
+
+    private static void showChosen(Button b, boolean chosen) {
+        b.setBackgroundTintList(ColorStateList.valueOf(chosen ? ACCENT : BUTTON));
+        b.setTextColor(chosen ? ON_ACCENT : TEXT);
+    }
+
+    /** Called by ddview (on its render thread) when the game's Escape menu starts or stops showing its main list. */
+    private void onMenuScreen(boolean on) {
+        handler.post(() -> controlsCard.setVisibility(on ? View.VISIBLE : View.GONE));
     }
 
     /** The game's view, and the text field the on-screen keyboard types into. */

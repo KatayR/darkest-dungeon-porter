@@ -1,10 +1,12 @@
 // libddview.so: the app side. Listens on an abstract unix socket for the game process (libddhost),
 // gets the game's frame buffers as AHardwareBuffers, and draws each presented frame (plus the
 // mouse cursor) onto the SurfaceView with GLES. No CPU copy: frames stay in GPU memory.
-// Also owns the cursor position: the Java trackpad sends relative moves, this sends absolute
-// positions to the game. Tells the activity when the game wants text (it shows the keyboard) and
-// when the trinket inventory or the provisions open or close (it shows the Shift button), and when the
-// party can walk (in a dungeon, outside a battle: it shows the walk buttons).
+// Also owns the cursor position: the Java trackpad sends relative moves and touch mode absolute
+// ones, this sends absolute positions to the game; touch mode may hide the drawn cursor. Tells the
+// activity when the game wants text (it shows the keyboard), when the trinket inventory or the
+// provisions open or close (it shows the Shift button), when the party can walk (in a dungeon,
+// outside a battle: it shows the walk buttons), and when the game's Escape menu shows its main list
+// (it shows the controls card).
 // Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
 // here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
@@ -48,13 +50,14 @@ static int pad;                    // a game controller is connected (DD_PAD)
 // cursor: position in game pixels, owned here (see file comment)
 static float cursor_x, cursor_y;
 static int cursor_visible = 1, cursor_w, cursor_h, cursor_hx, cursor_hy, cursor_dirty;
+static int cursor_shown = 1;       // the activity shows it (touch mode can hide it); drawn only if the game shows it too
 static unsigned char *cursor_pixels;
 
 // the activity, told when the game wants text (DD_TEXT_INPUT) and when the Shift button
-// (DD_SHIFT_SCREEN) and the walk buttons (DD_WALK_SCREEN) show
+// (DD_SHIFT_SCREEN), the walk buttons (DD_WALK_SCREEN) and the controls card (DD_MENU_SCREEN) show
 static JavaVM *vm;
 static jobject activity;
-static jmethodID on_text_input, on_shift_screen, on_walk_screen;
+static jmethodID on_text_input, on_shift_screen, on_walk_screen, on_menu_screen;
 
 // recent left clicks (cursor height and time), to tell the activity where the text field may be
 #define CLICKS    16
@@ -209,7 +212,7 @@ static void draw(int i) {
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, cursor_w, cursor_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, cursor_pixels);
         cursor_dirty = 0;
     }
-    if (cursor_visible && cursor_pixels) {
+    if (cursor_visible && cursor_shown && cursor_pixels) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         quad(cursor_tex, cursor_x - cursor_hx, cursor_y - cursor_hy, cursor_w, cursor_h, 1);
@@ -298,6 +301,13 @@ static void walk_screen(int on) {
         (*env)->CallVoidMethod(env, activity, on_walk_screen, (jboolean)on);
 }
 
+// DDActivity.onMenuScreen(on), from the render thread
+static void menu_screen(int on) {
+    JNIEnv *env = java_env();
+    if (env)
+        (*env)->CallVoidMethod(env, activity, on_menu_screen, (jboolean)on);
+}
+
 static void handle(int fd) {
     dd_msg m;
     int fence;
@@ -361,6 +371,9 @@ static void handle(int fd) {
         break;
     case DD_WALK_SCREEN:
         walk_screen(m.a != 0);
+        break;
+    case DD_MENU_SCREEN:
+        menu_screen(m.a != 0);
         break;
     }
 }
@@ -453,6 +466,7 @@ Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jobject 
     on_text_input = (*env)->GetMethodID(env, cls, "onTextInput", "(ZFF)V");
     on_shift_screen = (*env)->GetMethodID(env, cls, "onShiftScreen", "(Z)V");
     on_walk_screen = (*env)->GetMethodID(env, cls, "onWalkScreen", "(Z)V");
+    on_menu_screen = (*env)->GetMethodID(env, cls, "onMenuScreen", "(Z)V");
     game_w = w;
     game_h = h;
     refreshes = frame_refreshes > 1 ? frame_refreshes : 1;
@@ -491,13 +505,34 @@ Java_org_ddport_darkest_DDActivity_nativeSetSurface(JNIEnv *env, jclass cls, job
     write(wake[1], "w", 1);
 }
 
+// moves the cursor to x, y (game pixels), kept inside the game
+static void move_cursor(float x, float y) {
+    cursor_x = x < 0 ? 0 : x >= game_w ? game_w - 1 : x;
+    cursor_y = y < 0 ? 0 : y >= game_h ? game_h - 1 : y;
+    send_msg(DD_MOUSE_MOVE, (int)cursor_x, (int)cursor_y);
+    write(wake[1], "m", 1);   // redraw so the cursor follows even while the game shows a still frame
+}
+
+// the trackpad: a move by dx, dy (game pixels)
 JNIEXPORT void JNICALL
 Java_org_ddport_darkest_DDActivity_nativeMoveCursor(JNIEnv *env, jclass cls, jfloat dx, jfloat dy) {
     (void)env; (void)cls;
-    cursor_x = cursor_x + dx < 0 ? 0 : cursor_x + dx >= game_w ? game_w - 1 : cursor_x + dx;
-    cursor_y = cursor_y + dy < 0 ? 0 : cursor_y + dy >= game_h ? game_h - 1 : cursor_y + dy;
-    send_msg(DD_MOUSE_MOVE, (int)cursor_x, (int)cursor_y);
-    write(wake[1], "m", 1);   // redraw so the cursor follows even while the game shows a still frame
+    move_cursor(cursor_x + dx, cursor_y + dy);
+}
+
+// touch mode: the cursor goes to x, y (game pixels), under the finger
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativeSetCursor(JNIEnv *env, jclass cls, jfloat x, jfloat y) {
+    (void)env; (void)cls;
+    move_cursor(x, y);
+}
+
+// touch mode can hide the cursor (the finger shows where it is); the game still gets its moves
+JNIEXPORT void JNICALL
+Java_org_ddport_darkest_DDActivity_nativeShowCursor(JNIEnv *env, jclass cls, jboolean show) {
+    (void)env; (void)cls;
+    cursor_shown = show;
+    write(wake[1], "m", 1);   // redraw without it, or with it, on a still frame too
 }
 
 JNIEXPORT void JNICALL
