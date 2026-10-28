@@ -22,6 +22,7 @@ Runs your own GOG or Steam copy of **Darkest Dungeon®** (the Linux version) nat
 |---|---|---|---|
 | OnePlus 5 | Adreno 540 | LineageOS 22 (Android 15) | Title and dungeon at 1080p / 60 FPS |
 | Samsung Galaxy A34 | Mali-G68 | Android 16 | Title, new campaign and first dungeon at 1080p / 60 FPS; dungeon also at 1440p and 4K, at 60 and 30 FPS |
+| Google Pixel 10 Pro | PowerVR (Tensor G5) | Android 17 | Runs (a player's report, GOG version) |
 
 Other devices may work. Reports are welcome.
 
