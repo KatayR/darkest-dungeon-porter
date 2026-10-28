@@ -1827,8 +1827,10 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
          * The zip starts at 0 in a plain zip, or after what is in front of it. The end record counts
          * the central directory's offset from the zip's own start, and the directory ends at the
          * record. Past 4 GB a zip is zip64: its end record holds 0xffffffff, and the zip64 end record
-         * (found through its locator, just before the end record) holds the real values. Only the
-         * Steam zip, a plain zip, can be that big.
+         * (found through its locator, just before the end record) holds the real values. Python's
+         * zipfile (python3 -m zipfile -c, for a Steam copy zipped on Linux) writes the zip64 records
+         * already past 2 GB, with the real values still in the end record up to 4 GB, so a locator
+         * in front of the end record means zip64 too. Only the Steam zip, a plain zip, can be that big.
          */
         GameZip(FileChannel ch) throws IOException {
             long size = ch.size();
@@ -1841,7 +1843,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 throw new IOException(NOT_A_GAME_FILE);
             long end = size - len + i;
             long dirSize = b.getInt(i + 12) & 0xffffffffL, dirOffset = b.getInt(i + 16) & 0xffffffffL;
-            if (dirOffset == 0xffffffffL) {
+            boolean locator64 = end >= 20 && read(ch, end - 20, 4).getInt(0) == 0x07064b50;
+            if (dirOffset == 0xffffffffL || locator64) {
                 ByteBuffer locator = read(ch, end - 20, 20);
                 if (locator.getInt(0) != 0x07064b50)
                     throw new IOException(DAMAGED);

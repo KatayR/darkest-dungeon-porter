@@ -1295,3 +1295,17 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 - [x] It worked on the reporter's Pixel 10 Pro. Not tried on the A34 (a debug-signed 0.4.8 is there, so the release-signed APK would need an uninstall).
 - Merged into main with `logs-without-adb` (the same `DDActivity` resolution as the test APK) for 0.5.1.
 - [x] Release 0.5.1 (versionCode 14): the PowerVR fix and the four-finger logs, signed with the upload key (`963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`. Its `libGL.so` differs from the tested APK's only in the build time string (gl4es's `__DATE__`/`__TIME__`).
+
+## Steam zip made on Linux isn't recognised (2026-10-28)
+
+**Report:** a Bazzite player zipped their Steam copy's folder with `python3 -m zipfile -c ~/darkest-dungeon-steam.zip *` (from inside the game folder, `_linuxnosteam/` present). The import said "That file isn't a Darkest Dungeon or DLC installer from GOG, or the Steam zip."
+
+**Why:** Python's zipfile writes the zip64 end record and locator once the central directory's offset passes 2 GiB (`zipfile.ZIP64_LIMIT` is 2^31-1), but up to 4 GiB it keeps the real offsets in the end record instead of `0xffffffff`. `GameZip` took a zip as zip64 only on `0xffffffff`, so it computed the zip's start 76 bytes (the two zip64 records) in, found no local header there and gave up.
+
+**Plan:**
+- [x] `GameZip`: a zip64 locator in front of the end record also means zip64.
+- [x] Verify with a PC harness that compiles `GameZip` and `read()` out of `DDActivity.java`: the real Steam zip repacked by Python's zipfile (2.36 GB) failed before and passes now, and streams through `ZipInputStream` with all 9,706 entries and the counted bytes; the `.bat`'s Steam zip and the GOG 27988 and 26186 installers give the same results as before; small zips with and without zip64 records pass.
+
+**Progress:**
+- Workaround for 0.5.1, checked with the same harness on the old code: the same Python command with the threshold raised, `python3 -c "import zipfile; zipfile.ZIP64_LIMIT = 0xFFFFFFFE; zipfile.main()" -c ~/darkest-dungeon-steam.zip *`.
+- Still unsupported, as before: a zip64 zip with something in front of it (the zip64 path assumes a plain zip). GOG's installers have no zip64 records.
