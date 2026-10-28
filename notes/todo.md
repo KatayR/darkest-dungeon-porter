@@ -1276,3 +1276,8 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 **Plan:**
 - [x] `gl4es-pvr-packed-depth-stencil.patch`: split only without `GL_OES_packed_depth_stencil`, as on other GPUs. Added to `build-natives.sh`.
 - [ ] Verify: natives and APK build; Adreno and Mali unchanged (same code path as before); the reporter's Pixel 10 Pro shows the game, without the error in the logs.
+
+**Progress:**
+- `build-natives.sh` applies the patch to clean gl4es (`git apply --check` on a025615b) and builds; the APK's `libGL.so` equals the new build stripped with `--strip-unneeded` and differs from 0.4.8's.
+- Test APK for the reporter: `Desktop/darkest-dungeon-porter-0.5.0-pixel-fix.apk`, 0.5.0 plus this fix plus the four-finger logs (`logs-without-adb` merged in a throwaway worktree, not committed: that branch still sits on 0.4.8 and conflicts in `DDActivity`, where the four-finger hold now starts in `fingerAdded` and is cancelled in `onTouch`, for both control modes). Signed with the upload key (`963301da…3196934`).
+- [ ] Not tested on a phone: the A34 now has a debug-signed 0.4.8 (installed 19:04, after the signed logs APK), so the release-signed APK would need an uninstall; left alone. Untested on PowerVR until the reporter tries it.
