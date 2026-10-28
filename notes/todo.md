@@ -1224,6 +1224,18 @@ Asked: the Shift button should also show on the Provision screen (before embarki
 - [x] The owner tested on the phone (adb can't pinch, and the Provision screen is a long walk through menus): "works".
 - [x] Release 0.4.8 (versionCode 12) with these, signed with the upload key and checked with `apksigner`.
 
+## Logs without adb
+A player on a Pixel 10 Pro (GOG) gets a black screen with only the cursor, and can't run adb. Release builds aren't debuggable, so not even adb can read `dd.log` from them.
+
+**Plan:**
+- [x] Four fingers held for 2 s on the game screen write one text file in the cache folder: device, Android, SoC, game and screen size, refresh rate; this app's `logcat -d` (an app reads its own UID's logs without a permission, so both processes); the last 4 MB of `dd.log`.
+- [x] `LogProvider` serves that one file read-only, and the share sheet opens with it (`ACTION_SEND`, URI grant). Mail apps get the receiver (rasitarslan@outlook.com) and a subject with the version and phone model.
+- [x] README Controls and bug-report note.
+- [x] Verify on a phone: the reporter used the hold on the Pixel 10 Pro (0.4.8 logs APK) and the file arrived with the header, logcat and `dd.log`. Whether his mail app filled in the receiver and subject isn't known.
+
+**Progress:**
+- The release APK builds, its manifest has the provider, and it is signed with the upload key (`963301da…3196934`). Installed on the A34 after uninstalling the debug-signed 0.4.6; the game still has to be imported there before the hold can be tried.
+
 ## Touch controls, picked on the game's Escape menu (2026-10-28)
 Asked: touch controls as an alternative to the trackpad, selectable on the game's Escape menu: when that menu shows, the port's control options show too.
 
@@ -1275,9 +1287,10 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 
 **Plan:**
 - [x] `gl4es-pvr-packed-depth-stencil.patch`: split only without `GL_OES_packed_depth_stencil`, as on other GPUs. Added to `build-natives.sh`.
-- [ ] Verify: natives and APK build; Adreno and Mali unchanged (same code path as before); the reporter's Pixel 10 Pro shows the game, without the error in the logs.
+- [x] Verify: natives and APK build; Adreno and Mali unchanged (same code path as before); the reporter's Pixel 10 Pro shows the game.
 
 **Progress:**
 - `build-natives.sh` applies the patch to clean gl4es (`git apply --check` on a025615b) and builds; the APK's `libGL.so` equals the new build stripped with `--strip-unneeded` and differs from 0.4.8's.
 - Test APK for the reporter: `Desktop/darkest-dungeon-porter-0.5.0-pixel-fix.apk`, 0.5.0 plus this fix plus the four-finger logs (`logs-without-adb` merged in a throwaway worktree, not committed: that branch still sits on 0.4.8 and conflicts in `DDActivity`, where the four-finger hold now starts in `fingerAdded` and is cancelled in `onTouch`, for both control modes). Signed with the upload key (`963301da…3196934`).
-- [ ] Not tested on a phone: the A34 now has a debug-signed 0.4.8 (installed 19:04, after the signed logs APK), so the release-signed APK would need an uninstall; left alone. Untested on PowerVR until the reporter tries it.
+- [x] It worked on the reporter's Pixel 10 Pro. Not tried on the A34 (a debug-signed 0.4.8 is there, so the release-signed APK would need an uninstall).
+- Merged into main with `logs-without-adb` (the same `DDActivity` resolution as the test APK) for 0.5.1.
