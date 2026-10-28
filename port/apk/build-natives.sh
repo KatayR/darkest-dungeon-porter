@@ -36,7 +36,8 @@ fetch() {  # fetch NAME URL COMMIT [PATCH...]: clean checkout of COMMIT with the
 fetch box64 https://github.com/ptitSeb/box64.git $BOX64_COMMIT box64-glibc-on-bionic.patch box64-shared-lib.patch \
     box64-android-qsort.patch
 fetch gl4es https://github.com/ptitSeb/gl4es.git $GL4ES_COMMIT gl4es-android.patch gl4es-log-link-errors.patch \
-    gl4es-3d-textures.patch gl4es-negative-box-cache.patch gl4es-client-array-range.patch
+    gl4es-3d-textures.patch gl4es-negative-box-cache.patch gl4es-client-array-range.patch \
+    gl4es-pvr-packed-depth-stencil.patch
 fetch SDL2 https://github.com/libsdl-org/SDL.git $SDL2_TAG sdl2-no-java.patch
 
 ndk_cmake() {  # ndk_cmake SRC BUILD [cmake args...]

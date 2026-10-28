@@ -1261,3 +1261,18 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
   - Two-finger tap is the earlier behaviour: a finger held still for `TAP_MS` presses the left button, so a long tap is a click. Hold is the default; the choice is kept (key `holdRightClick`). The note wraps at the buttons' width rather than widening the card.
 - **Then asked: a "Show cursor" checkbox under Touch.** It sits right under Trackpad/Touch, above "Right click", on by default (key `touchCursor`). Unticked, ddview stops drawing the cursor (`nativeShowCursor`; drawn only when both the game and the app show it). The game still gets every move, so hover works the same. The trackpad always draws it.
 - [x] Release 0.5.0 (versionCode 13), signed with the upload key (certificate SHA-256 `963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`. Released before the phone checks above (asked to release); they are still open.
+
+## Black screen on the Pixel 10 Pro (PowerVR)
+
+**Report:** GOG version on a Google Pixel 10 Pro (Tensor G5, PowerVR GPU, Android 17): a black screen with only the cursor, at every resolution. Logs from the four-finger hold (0.4.8).
+
+**What the logs show:** the game runs at 60 FPS with audio, and logs `[ERROR] Unsupported framebuffer format.` five times right after start.
+
+**Why** (llvm-objdump of GOG 27988, `Framebuffer_CreateTarget(unsigned, unsigned, bool, char const*)` at 0xa837d0):
+- Each render target is a 2D texture (`GL_RGBA` or `GL_RGB`, `GL_UNSIGNED_BYTE`) on `GL_COLOR_ATTACHMENT0`, plus a `GL_DEPTH24_STENCIL8` renderbuffer on `GL_DEPTH_STENCIL_ATTACHMENT`.
+- On `GL_FRAMEBUFFER_UNSUPPORTED` (0x8cdd) it logs that line and returns NULL, so the game has no render targets and draws nothing; ddview still draws the cursor.
+- gl4es (`gl4es_glRenderbufferStorage`) splits `GL_DEPTH24_STENCIL8` into a depth renderbuffer plus a separate `GL_STENCIL_INDEX8` one on every Imagination GPU, even with `GL_OES_packed_depth_stencil`. GLES 2 lets a driver reject separate depth and stencil buffers, and this PowerVR does. The split was for old PowerVR SGX; Adreno and Mali already take the packed path.
+
+**Plan:**
+- [x] `gl4es-pvr-packed-depth-stencil.patch`: split only without `GL_OES_packed_depth_stencil`, as on other GPUs. Added to `build-natives.sh`.
+- [ ] Verify: natives and APK build; Adreno and Mali unchanged (same code path as before); the reporter's Pixel 10 Pro shows the game, without the error in the logs.

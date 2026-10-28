@@ -1,0 +1,15 @@
+diff --git a/src/gl/framebuffers.c b/src/gl/framebuffers.c
+index b0f02993..09e7a3a1 100644
+--- a/src/gl/framebuffers.c
++++ b/src/gl/framebuffers.c
+@@ -987,7 +987,9 @@ void APIENTRY_GL4ES gl4es_glRenderbufferStorage(GLenum target, GLenum internalfo
+     if (internalformat == GL_DEPTH_STENCIL)
+         internalformat = GL_DEPTH24_STENCIL8;
+     // in that case, create first a STENCIL one then a DEPTH one....
+-    if ((internalformat == GL_DEPTH24_STENCIL8 && (hardext.depthstencil==0 || ((hardext.vendor&VEND_IMGTEC)==VEND_IMGTEC)))) {
++    // (only without packed depth-stencil: PowerVR Rogue and later, like the Pixel 10's, need the packed
++    // buffer and report GL_FRAMEBUFFER_UNSUPPORTED for a separate depth and stencil pair)
++    if ((internalformat == GL_DEPTH24_STENCIL8 && hardext.depthstencil==0)) {
+         internalformat = (hardext.depth24)?GL_DEPTH_COMPONENT24:GL_DEPTH_COMPONENT16;
+         // create a stencil buffer if needed
+         if(!rend->secondarybuffer) {
