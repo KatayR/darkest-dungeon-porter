@@ -1309,3 +1309,4 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 **Progress:**
 - Workaround for 0.5.1, checked with the same harness on the old code: the same Python command with the threshold raised, `python3 -c "import zipfile; zipfile.ZIP64_LIMIT = 0xFFFFFFFE; zipfile.main()" -c ~/darkest-dungeon-steam.zip *`.
 - Still unsupported, as before: a zip64 zip with something in front of it (the zip64 path assumes a plain zip). GOG's installers have no zip64 records.
+- [x] Release 0.5.2 (versionCode 15): this fix, signed with the upload key (`963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`. Not tried on a phone: the import of a Python-made zip was checked only with the PC harness.
