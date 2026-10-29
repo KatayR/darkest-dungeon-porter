@@ -25,7 +25,10 @@ import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.system.Os;
 import android.text.InputType;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextUtils;
+import android.text.style.StyleSpan;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
@@ -445,20 +448,24 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     /** The Mods page's "?": how mods get onto the phone, from the Steam Workshop or from a site. */
     private void explainMods() {
+        String subscribed = "If the game is installed on the PC, it can take the mods you subscribed to instead.";
         String message = "Add mods takes zip, 7z or RAR files, with one or more mods in each.\n\n"
                 + "From the Steam Workshop (a Windows PC with Steam; the game doesn't need to be installed there):\n"
                 + "•  Run get-steam-mods.bat from the Releases page while Steam is running and logged in.\n"
-                + "•  Paste the Workshop links of the mods you want, one per line, then an empty line. With the "
-                + "game installed on the PC, it can take the mods you subscribed to instead.\n"
+                + "•  Paste the Workshop links of the mods you want, one per line, then an empty line. "
+                + subscribed + "\n"
                 + "•  It downloads them through Steam and packs them into darkest-dungeon-mods.zip next to it. "
                 + "Copy that zip to the phone and pick it with Add mods.\n\n"
                 + "From Nexus Mods and other sites: download the mod's file, on the phone or on a PC and copy it "
                 + "over, and pick it with Add mods. Archives with a password or split into parts need to be "
                 + "unpacked on a PC and zipped again.\n\n"
                 + "Adding a mod that is already installed replaces it, so a newer version updates it.";
+        SpannableString text = new SpannableString(message);
+        int at = message.indexOf(subscribed);
+        text.setSpan(new StyleSpan(Typeface.BOLD), at, at + subscribed.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("Getting mods")
-                .setMessage(message)
+                .setMessage(text)
                 .setNeutralButton("Releases page", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
                         Uri.parse("https://github.com/KatayR/darkest-dungeon-porter/releases"))))
                 .setNegativeButton("Close", null)
