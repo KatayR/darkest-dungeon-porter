@@ -249,8 +249,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * The hub: at the left a row per page, each with a one-line summary (Mods only once the game is
-     * imported); at the right the game, what is imported and Play, with the app's version under them.
+     * The hub: at the left a row per page, each with a one-line summary (Mods greyed out until the game is
+     * imported); at the right the game, what is imported and Play, with the app's version
+     * under them.
      */
     private View hub(Context c, boolean installed) {
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
@@ -266,8 +267,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         addRow(rows, row(c, R.drawable.ic_game, "Game files",
                 !installed ? "Not imported yet" : dlcs.isEmpty() ? store : store + " · " + String.join(", ", dlcs),
                 Page.GAME_FILES));
-        if (installed)
-            addRow(rows, row(c, R.drawable.ic_mods, "Mods", mods == 0 ? "None yet" : mods + " installed", Page.MODS));
+        addRow(rows, installed
+                ? row(c, R.drawable.ic_mods, "Mods", mods == 0 ? "None yet" : mods + " installed", Page.MODS)
+                : offRow(c, R.drawable.ic_mods, "Mods", "Import the game first"));
         addRow(rows, row(c, R.drawable.ic_saves, "Save file", hasSaves() ? "Import or export" : "No saves yet",
                 Page.SAVE_FILE));
         addRow(rows, row(c, R.drawable.ic_display, "Display", resolution(height) + " · " + fps + " FPS", Page.DISPLAY));
@@ -333,6 +335,17 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return row;
     }
 
+    /** A hub row that can't open yet, greyed out; its summary says why. */
+    private LinearLayout offRow(Context c, int icon, String title, String summary) {
+        LinearLayout row = row(c, icon, title, summary, null);
+        row.setBackground(null);
+        row.setOnClickListener(null);
+        row.setClickable(false);
+        for (int i = 0; i < row.getChildCount(); i++)
+            row.getChildAt(i).setAlpha(0.4f);
+        return row;
+    }
+
     /** Adds a row to the hub's card, sharing its height with the others, after a divider if not the first. */
     private static void addRow(LinearLayout rows, View row) {
         if (rows.getChildCount() > 0)
@@ -362,7 +375,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         ImageButton back = new ImageButton(c);
         back.setImageResource(R.drawable.ic_back);
         back.setImageTintList(ColorStateList.valueOf(TEXT));
-        back.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(), null));
+        back.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(CARD), null));
         back.setContentDescription("Back");
         back.setOnClickListener(v -> openPage(Page.HUB));
         LinearLayout top = new LinearLayout(c);
@@ -382,19 +395,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             case MODS:
                 title = "Mods";
                 modsPage(c, card);
-                help = new Button(c);
-                help.setText("?");
-                help.setTextSize(20);
-                help.setTextColor(TEXT);
-                help.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
-                help.setMinWidth(0);
-                help.setMinimumWidth(0);
-                help.setMinHeight(0);
-                help.setMinimumHeight(0);
-                help.setPadding(0, 0, 0, 0);
-                help.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(), null));
-                help.setContentDescription("How to get mods");
-                help.setOnClickListener(b -> explainMods());
+                help = helpButton(c, CARD, "How to get mods", this::explainMods);
                 action = button(c, "Add mods", BUTTON, TEXT);
                 action.setOnClickListener(b -> pickMods());
                 break;
@@ -438,12 +439,30 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return layout;
     }
 
-    /** A round button's background: a circle in the card's colour. */
-    private static GradientDrawable circle() {
+    /** A round button's background. */
+    private static GradientDrawable circle(int color) {
         GradientDrawable circle = new GradientDrawable();
         circle.setShape(GradientDrawable.OVAL);
-        circle.setColor(CARD);
+        circle.setColor(color);
         return circle;
+    }
+
+    /** A round "?" on a `fill` circle; `description` is what TalkBack reads. */
+    private static Button helpButton(Context c, int fill, String description, Runnable onClick) {
+        Button help = new Button(c);
+        help.setText("?");
+        help.setTextSize(20);
+        help.setTextColor(TEXT);
+        help.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        help.setMinWidth(0);
+        help.setMinimumWidth(0);
+        help.setMinHeight(0);
+        help.setMinimumHeight(0);
+        help.setPadding(0, 0, 0, 0);
+        help.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(fill), null));
+        help.setContentDescription(description);
+        help.setOnClickListener(b -> onClick.run());
+        return help;
     }
 
     /** The Mods page's "?": how mods get onto the phone, from the Steam Workshop or from a site. */
