@@ -1386,7 +1386,15 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 **Seen on the way:**
 - Removing and importing the game again deletes the mods: they live in `game/mods/`. (Happened at 21:48/21:55; the 3 test mods went.)
 - On the A34 the Mods card is below the left column's fold; it only shows after scrolling.
-- [ ] Nexus mods (later): Better Trinkets is `Oks_BetterTrinkets_v2.03/` with `preview_icon.png`, `trinkets/`, `dlc/…` and no `project.xml`.
+- Nexus mods: see below.
+
+### Nexus mods without project.xml (2026-10-29)
+**Problem:** Better Trinkets v2.03 (Nexus) is `Oks_BetterTrinkets_v2.03/` with `preview_icon.png`, `trinkets/base.entries.trinkets.json`, `dlc/580100_crimson_court/features/…/*.trinkets.json`, and no `project.xml`. The game finds local mods only by `mods/*/project.xml`, so the app found no mod. Its paths mirror the game's own.
+**Plan (title by the archive's name, chosen by the owner):**
+- [x] An archive with no `project.xml` at all: its mods are the outermost folders holding one of the imported game's top-level folders (any case) or `dlc/` (`dataRoots`). None either → `NOT_A_MOD` (now also names the data folders).
+- [x] Each such mod gets a JSON `project.xml` with the uploader's defaults (`newProject`: strings "", numbers 0, `preview_icon.png`, english, private, direct_upload). Title: the archive's name without extension and Nexus's `-<mod id>-<version>` suffix (`archiveTitle`, "Better Trinkets v2.03-76-v2-03.rar" → "Better Trinkets v2.03") when it is the only mod or at the archive's root; otherwise its folder's name.
+- [x] Any mod without `modfiles.txt` gets one, written after the final `project.xml`: `path size` per file, sorted, LF, no newline at the end (as Workshop mods have it).
+- [x] On the A34 (owner: "all works"): Add mods with the Better Trinkets RAR → "Better Trinkets v2.03 is installed."; listed by name in the game's mod screen; on a save, the trinkets have Better Trinkets' stats. Generated `project.xml` and `modfiles.txt` (6 files, including the mod's `Thumbs.db`) as planned.
 
 ### Workshop mods on a PC without the game (2026-10-29)
 **Asked:** can a PC fetch Workshop mods without downloading the game?

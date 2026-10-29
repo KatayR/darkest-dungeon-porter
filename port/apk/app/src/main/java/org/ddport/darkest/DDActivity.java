@@ -8,6 +8,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.database.Cursor;
 import android.graphics.Insets;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -19,6 +20,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.system.Os;
 import android.text.InputType;
 import android.util.Log;
@@ -73,8 +75,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.IntConsumer;
 import java.util.function.IntFunction;
@@ -135,7 +139,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             "That file isn't a Darkest Dungeon or DLC installer from GOG, or the Steam zip.";
     private static final String DAMAGED = "The file looks damaged or incomplete. Try copying it to the phone again.";
     private static final String PROJECT_FILE = "project.xml";   // marks a mod's folder
-    private static final String NOT_A_MOD = "That file has no Darkest Dungeon mods in it: no folder in it has a project.xml.";
+    private static final String NOT_A_MOD = "That file has no Darkest Dungeon mods in it: no folder in it has a project.xml "
+            + "or the game's data folders (heroes, trinkets and so on).";
     private static final String NOT_AN_ARCHIVE = "That file isn't a zip, 7z or RAR archive.";
     private static final String ENCRYPTED = "That archive is password-protected, which this app can't open. Please unpack "
             + "it on a PC and zip the mod's folder.";
@@ -144,6 +149,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final List<String> PROJECT_STRINGS = Arrays.asList("Title", "ModDataPath", "PreviewIconFile",
             "ItemDescriptionShort", "ItemDescription", "UpdateDetails", "Language", "Visibility", "UploadMode");
     private static final List<String> PROJECT_NUMBERS = Arrays.asList("VersionMajor", "VersionMinor", "TargetBuild");
+    private static final String MOD_FILES = "modfiles.txt";
     // colours of the launch and import screens
     private static final int BACKGROUND = 0xFF121214, CARD = 0xFF1D1D21, TEXT = 0xFFF2F2F2, MUTED = 0xFFA4A4AC,
             BUTTON = 0xFF2E2E35, ACCENT = 0xFFD9A441, ON_ACCENT = 0xFF1C1607;
@@ -1818,6 +1824,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 } catch (org.json.JSONException e) {   // only for a non-finite number, which never comes
                     throw new IOException(e);
                 }
+                File modFiles = new File(dir, MOD_FILES);
+                if (!modFiles.exists())
+                    writeModFiles(dir, modFiles);
                 String folder = folderName(title) + ".json";
                 for (Mod mod : installedMods())
                     if (mod.title.equals(title) || mod.dir.getName().equalsIgnoreCase(folder))
@@ -1838,9 +1847,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     /**
      * Unpacks each mod in the picked archive (zip, 7z or RAR) into a new folder in tmp, adding the folders
-     * to `unpacked` and their names in the archive ("Mod" for its root) to `fallbackTitles`. The archive is
-     * read twice, first for its names, then to unpack. A mod's project.xml lands as project.xml whatever
-     * the case of its name; macOS's __MACOSX/ folder is left out, and so are links.
+     * to `unpacked` and the titles to give them if they have none to `fallbackTitles`. The archive is read
+     * twice, first for its names, then to unpack. A mod's project.xml lands as project.xml whatever the case
+     * of its name; macOS's __MACOSX/ folder is left out, and so are links.
+     * An archive without any project.xml (as many Nexus mods come) holds mods made of the game's data
+     * folders (see dataRoots). Each gets a project.xml, titled by the archive's name when it is the only
+     * one or sits at the archive's root. Otherwise a mod's fallback title is its folder's name ("Mod" for
+     * the archive's root).
      */
     private void unpackModArchive(Uri file, File tmp, List<File> unpacked, List<String> fallbackTitles)
             throws IOException {
@@ -1853,14 +1866,22 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 throw new IOException(e.encrypted ? ENCRYPTED : names.isEmpty() ? NOT_AN_ARCHIVE : DAMAGED, e);
             }
             List<String> roots = modRoots(names);
+            boolean noProject = roots.isEmpty();
+            if (noProject)
+                roots = dataRoots(names);
+            if (roots.isEmpty())
+                throw new IOException(NOT_A_MOD);
 
             int first = unpacked.size();
+            String archiveTitle = noProject ? archiveTitle(file) : "";
             for (String root : roots) {
                 File dir = new File(tmp, Integer.toString(unpacked.size()));
                 dir.mkdirs();
                 unpacked.add(dir);
-                fallbackTitles.add(root.isEmpty() ? "Mod"
-                        : root.substring(root.lastIndexOf('/', root.length() - 2) + 1, root.length() - 1));
+                String folder = root.isEmpty() ? "Mod"
+                        : root.substring(root.lastIndexOf('/', root.length() - 2) + 1, root.length() - 1);
+                boolean byArchive = !archiveTitle.isEmpty() && (roots.size() == 1 || root.isEmpty());
+                fallbackTitles.add(byArchive ? archiveTitle : folder);
             }
             try (ArchiveInputStream in = new ArchiveInputStream(fd)) {
                 for (String entry; (entry = in.nextEntry()) != null; ) {
@@ -1892,20 +1913,106 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             } catch (ArchiveInputStream.ReadException e) {
                 throw new IOException(e.encrypted ? ENCRYPTED : DAMAGED, e);
             }
+            if (noProject)
+                for (int i = first; i < unpacked.size(); i++)
+                    Files.write(new File(unpacked.get(i), PROJECT_FILE).toPath(),
+                            newProject().toString().getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    /**
+     * A project.xml for a mod that came without one, with the values the game's mod uploader writes by
+     * default; unpackMods sets its title.
+     */
+    private static JSONObject newProject() {
+        JSONObject json = new JSONObject();
+        try {
+            for (String name : PROJECT_STRINGS)
+                json.put(name, "");
+            for (String name : PROJECT_NUMBERS)
+                json.put(name, 0);
+            json.put("PreviewIconFile", "preview_icon.png");
+            json.put("Language", "english");
+            json.put("Visibility", "private");
+            json.put("UploadMode", "direct_upload");
+        } catch (org.json.JSONException e) {   // only for a null name, which never comes
+            throw new IllegalStateException(e);
+        }
+        return json;
+    }
+
+    /**
+     * A picked file's name without its extension and without the "-<mod id>-<version>" Nexus adds to its
+     * downloads ("Better Trinkets v2.03-76-v2-03.rar" is "Better Trinkets v2.03"), or "".
+     */
+    private String archiveTitle(Uri file) {
+        String name = null;
+        try (Cursor c = getContentResolver().query(file, new String[] {OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst())
+                name = c.getString(0);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "no name for " + file, e);
+        }
+        if (name == null)
+            return "";
+        return name.replaceFirst("\\.[^.]*$", "").replaceFirst("^(.+?)-\\d+(-v?\\d[0-9A-Za-z]*)*$", "$1").trim();
+    }
+
+    /** Writes the modfiles.txt the game's mods carry: a line per file, its path in the mod and its size. */
+    private static void writeModFiles(File dir, File modFiles) throws IOException {
+        Path root = dir.toPath();
+        List<String> lines = new ArrayList<>();
+        try (Stream<Path> files = Files.walk(root)) {
+            for (Path f : (Iterable<Path>) files.filter(Files::isRegularFile)::iterator)
+                lines.add(root.relativize(f) + " " + Files.size(f));
+        }
+        lines.sort(null);
+        Files.write(modFiles.toPath(), String.join("\n", lines).getBytes(StandardCharsets.UTF_8));
     }
 
     /**
      * The mods among an archive's names: the folders holding a project.xml, with a / at their end ("" for
      * the archive's root), shallowest first. A project.xml inside a mod's folder is part of that mod.
      */
-    private static List<String> modRoots(List<String> names) throws IOException {
+    private static List<String> modRoots(List<String> names) {
         List<String> found = new ArrayList<>();
         for (String name : names) {
             int slash = name.lastIndexOf('/');
             if (name.substring(slash + 1).equalsIgnoreCase(PROJECT_FILE) && !name.startsWith("__MACOSX/"))
                 found.add(name.substring(0, slash + 1));
         }
+        return outermost(found);
+    }
+
+    /**
+     * The mods in an archive without a project.xml, as modRoots gives them: the folders holding one of the
+     * game's own data folders (heroes/, trinkets/, dlc/ and the others in the imported game, in any case),
+     * since a mod's files are laid out like the game's.
+     */
+    private List<String> dataRoots(List<String> names) {
+        Set<String> gameFolders = new HashSet<>();
+        gameFolders.add("dlc");   // there only once a DLC is imported
+        File[] dirs = gameDir().listFiles(File::isDirectory);
+        if (dirs != null)
+            for (File d : dirs)
+                if (!d.getName().equals("mods"))
+                    gameFolders.add(d.getName().toLowerCase(Locale.ROOT));
+        List<String> found = new ArrayList<>();
+        for (String name : names) {
+            if (name.startsWith("__MACOSX/"))
+                continue;
+            String[] parts = name.split("/");
+            for (int i = 0; i < parts.length - 1; i++)   // folders only
+                if (gameFolders.contains(parts[i].toLowerCase(Locale.ROOT))) {
+                    found.add(i == 0 ? "" : String.join("/", Arrays.asList(parts).subList(0, i)) + "/");
+                    break;
+                }
+        }
+        return outermost(found);
+    }
+
+    /** The folders in `found` that aren't inside another of them, shallowest first, each once. */
+    private static List<String> outermost(List<String> found) {
         found.sort(Comparator.comparingInt(String::length));
         List<String> roots = new ArrayList<>();
         outer:
@@ -1915,8 +2022,6 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                     continue outer;
             roots.add(root);
         }
-        if (roots.isEmpty())
-            throw new IOException(NOT_A_MOD);
         return roots;
     }
 

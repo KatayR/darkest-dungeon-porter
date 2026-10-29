@@ -62,6 +62,7 @@ Saves are kept in the app's private storage, so uninstalling the app deletes the
 ## Mods
 Once the game is imported, the **Mods** card on the launch screen lists the installed mods. **Add mods** takes one or more zip, 7z or RAR files of mods:
 - A mod is a folder with a `project.xml` in it, as Workshop mods come. One archive can hold many mods, at any depth.
+- Mods without a `project.xml`, as many Nexus mods come, work too: a folder laid out like the game's own (`heroes/`, `trinkets/`, `dlc/`, ...) is a mod, named after the archive ("Better Trinkets v2.03-76-v2-03.rar" becomes "Better Trinkets v2.03").
 - A mod that is already installed (same title) is replaced, so adding a newer version updates it.
 - Password-protected archives and archives split into parts (`.part1.rar`) can't be opened: unpack them on a PC and zip the mod's folder.
 
