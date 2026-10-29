@@ -1310,3 +1310,13 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 - Workaround for 0.5.1, checked with the same harness on the old code: the same Python command with the threshold raised, `python3 -c "import zipfile; zipfile.ZIP64_LIMIT = 0xFFFFFFFE; zipfile.main()" -c ~/darkest-dungeon-steam.zip *`.
 - Still unsupported, as before: a zip64 zip with something in front of it (the zip64 path assumes a plain zip). GOG's installers have no zip64 records.
 - [x] Release 0.5.2 (versionCode 15): this fix, signed with the upload key (`963301da…3196934`, checked with `apksigner`), published with `get-steam-game.bat` and `get-saves.bat`. Not tried on a phone: the import of a Python-made zip was checked only with the PC harness.
+
+## A damaged game zip shows Java's own error (2026-10-29)
+
+**Report:** a player's Steam zip from `get-steam-game.bat` failed on a Galaxy Tab S6 Lite with "invalid entry size (expected 956798 but got 956797 bytes)". 7-Zip's test of the same zip on the PC was clean (bsdtar 3.8.9, Windows 25H2, as here), the zip was copied over USB, and a 7-Zip zip of the same files imported. So the zip was damaged on its way to the tablet. The entry is `monsters/cyst/anim/cyst.sprite.attack_heal.png` (956,798 bytes, in every Steam zip).
+
+**Why that error:** in a deflate stream a match's length partly sits in plain extra bits, so one flipped bit there still decodes cleanly but a byte short, and `ZipInputStream` checks the size before the CRC. `unpackGame` let the `ZipException` through, so the launch screen showed its raw message; `unpackSaves` turns it into `DAMAGED` ("Try copying it to the phone again").
+
+**Plan:**
+- [x] `unpackGame`: a `ZipException` while unpacking becomes `DAMAGED`, as in `unpackSaves`. `GameZip` has taken the file by then, so it can only be damaged data.
+- [x] Verify: the debug APK builds. On the PC, Windows tar's zip of the cyst PNG at the `.bat`'s settings reads back cleanly; 3,000 single-bit flips in its data each give a `ZipException` (123 of them "invalid entry size", most others a CRC error), so each now shows `DAMAGED`. Not tried on a phone.
