@@ -488,7 +488,6 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 .setNeutralButton("Releases page", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
                         Uri.parse("https://github.com/KatayR/darkest-dungeon-porter/releases"))))
                 .setNegativeButton("Close", null)
-                .setPositiveButton("Add mods", (d, w) -> pickMods())
                 .show();
     }
 
