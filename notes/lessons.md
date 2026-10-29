@@ -19,9 +19,12 @@ Project rules learned from mistakes made during the port.
 - Edit files in an app's external storage through the FUSE path (`/storage/emulated/0/...`), never underneath it in `/data/media`. Changes made below FUSE left the app seeing the old file sizes, so the game read truncated shaders and failed with no useful error.
 - `cmd f | ... > f` empties `f` before `cmd` reads it, because the shell opens the redirect first. Make any backup of `f` in a separate step before the pipeline. This wiped four shaders once; the chroot copy restored them.
 - Toybox `grep` on the phone doesn't support `\|` alternation in basic regex and fails silently. Use `grep -E 'a|b'`.
+- Android's Downloads picker reads the media index: files pushed with adb stay invisible there until scanned (`am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://<path>`). Scan after every push of test files.
 
 ## Debugging a closed-source binary
 - When a fix "doesn't work", test the hypothesis before building the workaround. The shader-type theory was wrong, and a one-file experiment showed it before any gl4es work was done. If the binary has symbols, disassembling the failing function (`llvm-objdump -C`) found the real cause, the file size and focus checks, faster than guessing.
+- When the game's data comes out empty, first prove whether the port's side delivers it: one temporary log at the I/O boundary (Box64's `my_fopen64`) settles it in one build. Tracing the game's storage layer statically (FindFiles, mounts, glob) took far longer and only cleared the port. The bug was in the game's own XML reader, which the log pointed at right away.
+- Read what a "required field" branch actually does before trusting it. In GOG 27988, `UGCProjectMetadata::ReadXMLFile` finds `<Title>` and then always takes the "malformed" branch, so local mods have no names on any device; its JSON twin works.
 - An object existing is not the same as its screen showing. The walk buttons first keyed on `Raid::s_Instance`, and showed over the dungeon's loading screen, because the raid is created before it loads. When gating UI on game state, list every screen that shows while the object exists (loading, transitions, menus over it) and check each one before testing.
 
 ## Emulation bugs
@@ -73,6 +76,7 @@ Project rules learned from mistakes made during the port.
 - Windows `tar` (bsdtar) writes zip entries with data descriptors (flag 8). Java's `ZipInputStream` rejects STORED entries that have one, so `zip:compression=store` can't be imported; deflate entries are fine. Use `zip:compression-level=1`: 49 s and 2.38 GB for the whole Steam game with two DLCs, against 55 s at the default level. Check any new zip writer with `ZipInputStream` on the PC.
 - `tar -T list` accepts `-C` and a folder on their own lines, so one list can merge several depot folders into one zip.
 - Check a new zip writer at full size, with the app's own `GameZip` and `ZipInputStream`, before handing its command to anyone. `python3 -m zipfile -c` passed on a tiny test zip and was given to a Bazzite player for their Steam copy, which failed to import: Python adds zip64 end records past 2 GiB (`zipfile.ZIP64_LIMIT`) but keeps the real offsets in the end record up to 4 GiB, and `GameZip` took a zip as zip64 only when the end record held `0xffffffff`. A re-pack of the real Steam zip shows size-dependent formats; a tiny zip never does.
+- Never delete Workshop item folders behind Steam's back. Steam reuses chunks across items it believes are installed, so a later download fails ("Missing game files", result "Failure") until Steam validates its files again. `get-steam-mods.bat` had a "delete Steam's copies" step that did exactly this; it was removed.
 - Run a `.bat` from Git Bash as `cmd //c "$(cygpath -w <path>)"`; a bare name fails with "not recognized" when the bat isn't in cmd's current folder.
 - Python edits to Windows paths: a backslash-t in a normal string literal is a tab (`System32\tar.exe` broke this way, twice). Use raw strings, or edit the file directly in an editor.
 
@@ -92,3 +96,15 @@ Project rules learned from mistakes made during the port.
 
 ## UI changes asked in words
 - Restate a layout request in screen terms (what moves, by how much, measured from what) before building it, when it can be read two ways. "Halve the gap between upper and bottom part of screen and the buttons" was read as the gaps to the screen's top and bottom edges, which made the buttons two-thirds of the screen tall and cost an install cycle; the next guess (the gap to the hero panel) was still not it. Ask where the edges should land before building.
+
+## Briefing research agents
+- Pass on the constraint as it was asked, and add none. "Fetch Workshop mods without downloading the game" went to a research agent as also "without a login", although the Steam client is open and logged in anyway. The report then ranked options by a requirement nobody had set, and the search had to be done again. Before sending a brief, check each "without X" in it against the request.
+
+## Launch screen
+- Don't build in the app what the game already does. The Mods card first had a Remove button per mod and a line on how to turn mods on; both were cut, since the game's own mod screen turns mods on and off per save. Before adding a control or a how-to line, check whether the game covers it.
+
+## Scope choices
+- Say "not supported yet" for something left out to keep a first version small, never "can't". 7z and RAR mods were refused with "this app can't open" and documented as impossible, when nothing on Android stopped them (libarchive took an afternoon). The owner then had to ask "we really can't?". When cutting a format or feature, write down why and what it would take, so it reads as a choice.
+
+## Facts about the game outside the repo
+- Look up store and platform facts (which versions exist, on which devices) before stating them, and stop at what the source says. "Darkest Dungeon has an iOS version" got stretched to "iPad and iPhone". The App Store only has the iPad-only "Darkest Dungeon: Tablet Edition" (2017).

@@ -1,6 +1,7 @@
 # Native part of the app. box64 (libbox64.so) and gl4es (libGL.so) are prebuilt by build-natives.sh
 # into ${DD_BUILD}/out/jniLibs.
 #   app process:  libddview.so (presents the game's frames, sends input)
+#                 libddarchive.so (reads mod archives: libarchive, prebuilt by build-natives.sh)
 #   game process: libddhost.so (an executable) + libddglue.so + libddaudio.so + libSDL2.so + libbox64.so + libGL.so
 cmake_minimum_required(VERSION 3.10)
 project(ddport C)
@@ -43,3 +44,10 @@ set_target_properties(ddhost PROPERTIES OUTPUT_NAME libddhost SUFFIX .so
 
 add_library(ddview SHARED ${NATIVE}/ddview/ddview.c)
 target_link_libraries(ddview EGL GLESv2 android nativewindow log)
+
+# libarchive and liblzma, static
+set(ARCHIVE ${DD_BUILD}/out/archive)
+add_library(ddarchive SHARED ${NATIVE}/ddarchive/ddarchive.c)
+target_include_directories(ddarchive PRIVATE ${ARCHIVE}/include)
+target_compile_definitions(ddarchive PRIVATE LIBARCHIVE_STATIC)
+target_link_libraries(ddarchive ${ARCHIVE}/lib/libarchive.a ${ARCHIVE}/lib/liblzma.a z)

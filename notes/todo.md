@@ -1320,3 +1320,93 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 **Plan:**
 - [x] `unpackGame`: a `ZipException` while unpacking becomes `DAMAGED`, as in `unpackSaves`. `GameZip` has taken the file by then, so it can only be damaged data.
 - [x] Verify: the debug APK builds. On the PC, Windows tar's zip of the cyst PNG at the `.bat`'s settings reads back cleanly; 3,000 single-bit flips in its data each give a `ZipException` (123 of them "invalid entry size", most others a CRC error), so each now shows `DAMAGED`. Not tried on a phone.
+## Mods (2026-10-29)
+
+**Asked:** players want mods. Is it doable, and how?
+
+**How the game loads local mods** (llvm-objdump of GOG 27988, `DefaultUserServices::InitializeLocalUserGeneratedContent()` at 0xc35ed0):
+- At start it finds every `mods/*/project.xml` (`FileMatch` on `mods/.*/project.xml`). For each one:
+  - its folder becomes the mod's root `mods/<folder>/`;
+  - `modfiles.txt` there is loaded as its file list;
+  - `project.xml` is read for the metadata (`UGCProjectMetadata::Load`; a file it can't find is skipped without a log line, since the Logger is null);
+  - the mod's **id is its `<Title>`** (`SetId(GetTitle())`), its source `mod_local_source`, its icon `preview_icon.png`.
+- Mods hold data only, never code. The Linux build also takes `-mod_profile <json>` (`{"version":1,"mods":[{"name","source"}]}`), which applies a mod list to the save.
+- `mirrorGame` already symlinks `mods/` into the mirror, so a folder in `getExternalFilesDir()/game/mods/` reaches the game. The GOG installer ships an empty `mods/` (just `preview_icon.png`).
+
+**Test 1 (A34, debug 0.5.1):** Stacking Inventory (Workshop 840387268), copied from the PC's Workshop folder with adb + `run-as cp` into `game/mods/stacking_inventory/`. It was listed in the game, enabled on a save, and worked.
+- The mod's `modfiles.txt` lists only 5 of its 9 files; that did no harm.
+- External storage ignores case on the A34: `PROJECT.XML` and `Inventory/BASE.SUPPLY…` found the files. So Windows-made mods with wrong case are fine here.
+- `dd.log` has no mod lines and no new errors (its 356 `PartyName … invalid required hero class: runaway/duelist` lines come from vanilla data).
+- The save (`profile_0/persist.game.json`, `applied_ugcs_1_0`) recorded the mod as `{name: "", source: mod_local_source}`, not `"Stacking Inventory"`.
+
+**Test 2: every local mod is nameless.** With Faster Scouting (1419394405) next to it, and a third mod the owner added, the mod screen listed 3 entries without names.
+- Not the port: a temporary log in Box64's `my_fopen64` (since removed) showed each `mods/*/project.xml` opened 3 times (size check, length, read) at its full size. The data mount's root is `""`, so paths are relative to the mirror; `FindFiles` (`glob` over `mods/*`, `mods/*/*`) and `GetFileSize` (`fopen` + `ftell`) agree.
+- **A bug in the game:** `UGCProjectMetadata::ReadXMLFile` (0xc39590) finds each node (`Title`, `ModDataPath`, `PreviewIconFile`, …) and then always takes the "Error - Variable %s is malformed. Expected string." branch. It never copies a value. So every mod read from `project.xml` gets an empty title, and an empty id in saves: one mod works, but several share the id `""`.
+- `ReadJSONFile` (0xc38290, rapidjson) does copy the values: it checks for a JSON string, then stores it. `Load()` (0xc3a350) uses it whenever the **path** contains `.json` (`strstr`), and the XML reader only otherwise. The scan only ever looks for `project.xml` (`UserGeneratedContent::c_ProjectFilename`).
+- **Workaround, confirmed on the A34:** the folder renamed `mods/<name>.json/`, its `project.xml` rewritten as a JSON object with the same keys (`"Title"`, `"ModDataPath"`, `"PreviewIconFile"`, `"Language"`, … as strings; `"VersionMajor"`, `"VersionMinor"`, `"TargetBuild"` as numbers). The mod screen then showed "Faster Scouting" and "Stacking Inventory (1.10)" with its own icon; the unconverted mod stayed blank.
+- [x] A new save (`profile_2`) with both enabled records both: `applied_ugcs_1_0` = `{Faster Scouting, mod_local_source}`, `{Stacking Inventory, mod_local_source}`.
+- Not checked: whether Steam's Linux 28212 (and GOG 26186) have the same broken XML reader. The JSON route works there either way, as long as they have `ReadJSONFile` and the `.json` check in `Load()`.
+
+**Plan (as built):**
+- [x] Launch screen, once the game is imported: a **Mods** card under Save file. It lists the installed mods by title (the folder's name if there is none), then **Add mods**: the file picker, one or more zips. (A Remove button per mod and a line on turning mods on were built and then cut on request: the game's own mod screen does both, per save.)
+- [x] `unpackMods` (on the `saveTask` pattern):
+  - [x] The mods are the folders in a zip holding a `project.xml` (any case; the zip's root counts; one inside another is part of it; `__MACOSX/` is left out). A zip with none gets `NOT_A_MOD`. (7z and RAR were refused by their magic bytes at first; see "7z and RAR" below.)
+  - [x] Each mod is unpacked into `mods.import/<n>` (beside `game/`, so the mirror never links it), and its `project.xml` is rewritten as JSON (`projectJson`: the fields in `PROJECT_STRINGS` and `PROJECT_NUMBERS`; Tags are left out). It then moves to `game/mods/<title>.json`, replacing any installed mod with the same title or folder.
+  - [x] Zip-slip check as in the save import. No free-space check before unpacking: a full disk fails the write, and `mods.import/` is deleted either way.
+  - [x] Files are copied as they are: no change to `modfiles.txt`, the mirror or the launch.
+  - [x] The message after Add mods is just "<names> is/are installed." (its hint about the game's mod screen was cut too).
+- [x] README: a Mods section.
+- [ ] Verify on the A34 (the test zips are in `Download/ddmods-test/`):
+  - imports: Stacking Inventory as a zip; Faster Scouting + Compact Circus Icon picked together; a mod at the zip's root; the whole Workshop folder (4 mods, numeric folders, one with mixed-case paths); a 7z (message); a zip with no mod (message); the same mod again (replaced, not doubled);
+  - in the game: listed with titles, enabled, working.
+
+**Not now (each waits for a mod that needs it):**
+- mods that ship `.glsl` shaders (would need `patch-shaders.sh` run on them);
+
+### 7z and RAR (2026-10-29)
+**Asked:** "we really can't work with rar?" Zip-only had been a scope choice (the app had no dependencies), not a limit. Chosen: libarchive for every format, zip included, so there is one unpack path.
+- Pure-Java options were turned down: Commons Compress + XZ for Java reads 7z, but junrar reads only RAR4, and current WinRAR (7.20 here) writes RAR5 and can't even write RAR4 any more (`-ma4` is rejected).
+- `build-natives.sh` fetches libarchive v3.8.10 (`0c48412be`) and xz v5.8.4 (`d3e650e63`) and builds both static (no tools, tests, crypto, bzip2, zstd, lz4, xml). zlib is the NDK's `libz.so`, iconv is bionic's. Out: `$DD_BUILD/out/archive/{include,lib}`.
+- `native/ddarchive/ddarchive.c` → `libddarchive.so` (360 KB stripped; NEEDED only libz, libm, libdl, libc). Formats zip, 7zip, rar, rar5. `archive_read_open_fd` after `lseek(fd, 0)`, so each pass is a new reader on the same descriptor; libarchive never closes it.
+- `ArchiveInputStream` (Java) reads like `ZipInputStream`: `nextEntry()` (UTF-8 name, folders end in /), `isFile`/`isDirectory`/`isEncrypted`/`time`, `read`. Errors come as `ReadException` with `encrypted` set from `archive_read_has_encrypted_entries`, so the app tells a password-protected archive from a damaged one without matching message text. The native message is made ASCII-safe for `NewStringUTF`.
+- `unpackModArchive` replaces `unpackModZip`, same two passes and rules. Links (and anything not a file or folder) are skipped. Messages: `NOT_AN_ARCHIVE` (libarchive can't open it), `ENCRYPTED`, `DAMAGED` (an error after the first entry), `NOT_A_MOD` (now "That file has no Darkest Dungeon mods in it: …"). Saves import stays on `ZipInputStream`.
+- Licences: libarchive (BSD-2 + the UC Regents notice its COPYING names) and liblzma (0BSD) in `THIRD_PARTY_NOTICES.txt`; README credits.
+- Two passes decompress a solid 7z/RAR twice (skipping an entry in a solid block means unpacking it). Fine for mod sizes; a single pass would need renames on the A34's case-insensitive storage to fix `project.xml`'s case.
+
+**Tests:**
+- [x] On the A34, a test binary linked like `libddarchive.so` (scratchpad, not in the repo) on libarchive's own RAR4 samples: plain, `compress_best`, filters (x86 `bsdcat.exe`), multi-LZSS, PPMd↔LZSS (241 MB), binary data, Unicode names. Every file's size and CRC-32 matched WinRAR 7.20 extracting the same archives on the PC. Encrypted data: entries flagged encrypted; encrypted headers: `encrypted 1`. A `.part0001.rar` alone: "Bad RAR file data" (→ `DAMAGED`).
+- [x] Same binary: RAR5 with `-hp` and 7z with header encryption → header error with `encrypted 1`; RAR5 with `-p` → names listed, each flagged encrypted; a PNG → "Unrecognized archive format".
+- [x] Through the app: a solid RAR5 of two Workshop mods (The Windstrider, Waifu Skin for Highwayman) → "The Windstrider and Waifu Skin for Highwayman are installed."; all 250 files md5-identical to Steam's copies.
+- [x] Through the app: a Nexus RAR (Better Trinkets v2.03) was read; it has no `project.xml`, so `NOT_A_MOD`.
+- [x] Through the app: `10` (7z, LZMA2) installed The Malevolent Satyr Boss Quest and Stacking Inventory, 150 files md5-identical to Steam's; `11` (RAR5 `-hp`), `12` (RAR5 `-p`) and `13` (7z, encrypted header) → `ENCRYPTED`; `14` (PNG) → `NOT_AN_ARCHIVE`.
+- [x] Through the app, zips on the new path: `2` (Faster Scouting) and a newer `get-steam-mods.bat` zip (Satyr Class Mod, The Miscreant Mod Class - Remastered, Stacking Inventory, the last replacing the installed one). Zips 1, 3–6 weren't rerun.
+- [x] The whole `build-natives.sh` runs clean (exit 0) with the new part: Box64, gl4es, the x64 libraries and `out/archive/` all rebuilt.
+- Files pushed with adb don't show in the system picker's Downloads until the media index scans them (`am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://…`).
+
+**Seen on the way:**
+- Removing and importing the game again deletes the mods: they live in `game/mods/`. (Happened at 21:48/21:55; the 3 test mods went.)
+- On the A34 the Mods card is below the left column's fold; it only shows after scrolling.
+- [ ] Nexus mods (later): Better Trinkets is `Oks_BetterTrinkets_v2.03/` with `preview_icon.png`, `trinkets/`, `dlc/…` and no `project.xml`.
+
+### Workshop mods on a PC without the game (2026-10-29)
+**Asked:** can a PC fetch Workshop mods without downloading the game?
+
+**Tested on this PC, with DD uninstalled through Steam** (`appmanifest_262060.acf` and `workshop/content/262060/` gone; then 2 more mods subscribed in the browser):
+- Steam's public `ISteamRemoteStorage/GetPublishedFileDetails` has no public download for DD mods (`file_url` empty; content behind `hcontent_file`, a depot manifest). So only a logged-in Steam client can download them.
+- `steam.exe +workshop_download_item 262060 <id>`, handed to the running client (like `+download_depot` in `get-steam-game.bat`), downloads the item into `steamapps\workshop\content\262060\<id>\`. `logs\workshop_log.txt` says `Download item <id> result : OK`. No subscription is needed for the item asked for, and the game isn't installed.
+- That first request also loads DD's Workshop state. Steam logs `added subscribed item <id>` for each subscription and writes `steamapps\workshop\appworkshop_262060.acf`, whose `WorkshopItemDetails` lists every subscribed item (`"subscribedby"`). Then, on its own, it downloads all of them: `Starting Workshop download job (downloading  )` … `Finished Workshop download job`, with `"NeedsDownload" "0"` in the acf at the end. All 5 subscriptions (33.8 MB + 4 small) were on disk 22 s after the request.
+- A request for a nonexistent item (`1`) only logs `Download item 1 result : File Not Found`.
+- **The subscription list isn't reliable without the game.** Retest from scratch (Steam closed, the acf and `content/262060/` deleted, Steam started again): neither a request for `1` nor one for a real, unsubscribed item (3808690291, downloaded OK) brought in any `added subscribed item` line or `subscribedby` entry. The first test only listed them because Steam still had DD's list in memory: DD was installed earlier in that session, and the 2 new subscriptions arrived live (`Subscribed to item … @ 21:12`). Steam only asks for the list for installed games (`Requesting updated subscription list` appears only for those).
+- So without the game, a script has to be told which mods: item links or ids (each downloads without a subscription). With the game installed, `appworkshop_262060.acf` has the subscriptions.
+- Each item's folder is a mod root (`project.xml`, `modfiles.txt`, the data) and goes through Add mods as it is.
+
+**`port/steam/get-steam-mods.bat`** (plain batch, in the style of `get-steam-game.bat`):
+- Which mods: when an `appworkshop_262060.acf` in some library lists items `"subscribedby"` this account (`ActiveProcess\ActiveUser`, hex, as a decimal number), it offers "Pack the N mods you subscribed to?". Otherwise, or on N, it takes pasted Workshop links (the number after `?id=`, cut at `&`) or bare numbers, de-duplicated, one per line, ending with an empty line.
+- For each one, `+workshop_download_item 262060 <id>` goes to the running client. It then waits for `Download item <id> result : ` past the log's old lines: OK → the folder goes into the zip; anything else → skipped with Steam's reason. If the request doesn't show up within 60 s, the script stops: "Steam didn't answer".
+- Libraries: Steam's own plus each `"path"` in `libraryfolders.vdf`. Then `tar` (deflate level 1) packs the `<id>` folders into `darkest-dungeon-mods.zip`. Steam's copies stay (see the Failure below).
+- Batch pitfalls met: `%LINK:*id=%` cuts at "id", because the `=` ends the text to find; the `{` line after an item's id in the acf also has no value and must not replace the id.
+- [x] Tested for real (DD uninstalled): 2 full links (one with `&searchtext=`), a bare id, a duplicate, `abc` (rejected), `1` (skipped: "File Not Found"). The zip held the 3 mod folders, 655 entries (113 MB unpacked), all read by `ZipInputStream`. Steam's copies were deleted by a clean-up step the script had then.
+- [x] **That clean-up broke Steam's downloads; it was removed.** On the owner's run, 3773368472 failed: `Update canceled: Failed updating depot 262060 while reading chunk … (File Not Found) (Missing game files)`, then `result : Failure`. Steam had planned to reuse 24.5 MB of chunks (`reuse 0/24504166`) from a deleted item that its acf still listed as installed (probably 3773471381, likely by the same author). Steam then ran `full workshop file validation`, which downloaded the deleted items again, and a retry gave OK. Without the clean-up, both of the owner's links download and pack.
+- [x] The subscriptions path, on a copy pointed at a test library (an acf with 5 items of this account and 1 of another, and an appmanifest): it found the 5, offered them, and N went on to links.
+- A research agent found no easier way: the subscriptions page and `EnumerateUserSubscribedFiles` need a login or a publisher key; DepotDownloader `-pubfile` and SteamCMD need the account's password in a separate tool; web downloaders are dead or unreliable for paid games. The README points to the logged-in subscriptions page for copying links.
+- [ ] Release: attach `get-steam-mods.bat` with `get-steam-game.bat` and `get-saves.bat`.

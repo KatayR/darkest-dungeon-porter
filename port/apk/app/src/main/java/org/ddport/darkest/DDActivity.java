@@ -52,6 +52,7 @@ import android.widget.Toast;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -83,6 +84,12 @@ import java.util.zip.ZipException;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.json.JSONObject;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
 /**
  * Runs the Linux x86_64 Darkest Dungeon in a child process (native/host: box64 + the game) and shows
  * its frames (native/ddview). The game can't run in this process: ART's heap occupies the fixed
@@ -91,6 +98,7 @@ import java.util.zip.ZipOutputStream;
  * makes, into getExternalFilesDir()/game (see importGame), and runs it through a private mirror (see
  * mirrorGame). The game's saves are in getFilesDir(); the launch screen exports them to a zip and
  * imports them from one (see unpackSaves), so they can outlive an uninstall and move between devices.
+ * Mods come from zip, 7z or RAR files into the game's mods/ folder (see unpackMods).
  *
  * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
  * extras "height" and "fps" skip it.
@@ -116,7 +124,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final int[] FPS = { 60, 30, 20, 15 };
     private static final int SCANCODE_ESCAPE = 41;   // SDL_SCANCODE_ESCAPE
     private static final int PICK_INSTALLER = 1;     // request codes of the file pickers
-    private static final int IMPORT_SAVES = 2, EXPORT_SAVES = 3;
+    private static final int IMPORT_SAVES = 2, EXPORT_SAVES = 3, PICK_MODS = 4;
     private static final String SAVE_OPTIONS = "persist.options.json";   // the game's options, in the save folder
     private static final long SAVES_MAX_BYTES = 100_000_000;   // saves are a few MB; a bigger file isn't read
     private static final String NOT_SAVES =
@@ -126,6 +134,16 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String NOT_A_GAME_FILE =
             "That file isn't a Darkest Dungeon or DLC installer from GOG, or the Steam zip.";
     private static final String DAMAGED = "The file looks damaged or incomplete. Try copying it to the phone again.";
+    private static final String PROJECT_FILE = "project.xml";   // marks a mod's folder
+    private static final String NOT_A_MOD = "That file has no Darkest Dungeon mods in it: no folder in it has a project.xml.";
+    private static final String NOT_AN_ARCHIVE = "That file isn't a zip, 7z or RAR archive.";
+    private static final String ENCRYPTED = "That archive is password-protected, which this app can't open. Please unpack "
+            + "it on a PC and zip the mod's folder.";
+    // the project.xml fields the game's JSON reader takes (UGCProjectMetadata::ReadJSONFile), as strings
+    // or as numbers; others (Tags, RemoveTags) are left out
+    private static final List<String> PROJECT_STRINGS = Arrays.asList("Title", "ModDataPath", "PreviewIconFile",
+            "ItemDescriptionShort", "ItemDescription", "UpdateDetails", "Language", "Visibility", "UploadMode");
+    private static final List<String> PROJECT_NUMBERS = Arrays.asList("VersionMajor", "VersionMinor", "TargetBuild");
     // colours of the launch and import screens
     private static final int BACKGROUND = 0xFF121214, CARD = 0xFF1D1D21, TEXT = 0xFFF2F2F2, MUTED = 0xFFA4A4AC,
             BUTTON = 0xFF2E2E35, ACCENT = 0xFFD9A441, ON_ACCENT = 0xFF1C1607;
@@ -183,8 +201,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Three cards: the resolution and frame rate on the left, with the save file's import and export
-     * under them; importing the game or its DLCs, and what is imported so far, on the right. Play is
+     * Cards: the resolution and frame rate on the left, with the save file's import and export under
+     * them and, once the game is imported, its mods under those; importing the game or its DLCs, and
+     * what is imported so far, on the right. Play is
      * below them, in the middle, once the game is imported. A message from the last import or export,
      * if any, opens in a dialog with the title given.
      */
@@ -232,7 +251,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         underSettings.topMargin = dp(c, 12);
         leftCards.addView(saves, underSettings);
-        ScrollView leftScroll = new ScrollView(c);   // both cards can be taller than a short screen
+        if (installed) {   // mods need the game
+            LinearLayout.LayoutParams underSaves = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            underSaves.topMargin = dp(c, 12);
+            leftCards.addView(modsCard(c), underSaves);
+        }
+        ScrollView leftScroll = new ScrollView(c);   // the cards can be taller than a short screen
         leftScroll.setFillViewport(true);
         leftScroll.addView(leftCards);
 
@@ -358,6 +383,25 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return s.toString();
     }
 
+    /** The mods card: each installed mod by its title, then Add mods. */
+    private LinearLayout modsCard(Context c) {
+        LinearLayout card = card(c);
+        card.setBackground(rounded(c));
+        card.addView(heading(c, "Mods"));
+        List<Mod> mods = installedMods();
+        if (mods.isEmpty())
+            card.addView(text(c, "None yet. Add takes zip, 7z or RAR files with one or more mods in them.", 14, MUTED), below(c, 8));
+        for (Mod mod : mods)
+            card.addView(text(c, mod.title, 16, TEXT), below(c, 4));
+        Button add = button(c, "Add mods", BUTTON, TEXT);
+        add.setOnClickListener(b -> pickMods());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(c, 12);
+        card.addView(add, lp);
+        return card;
+    }
+
     /** A dropdown of the values' labels; `selected` (else the first) is shown. */
     private static Spinner dropdown(Context c, IntFunction<String> label, int[] values, int selected) {
         String[] labels = new String[values.length];
@@ -469,6 +513,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 .setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_INSTALLER);
     }
 
+    /** The system file picker, for one or more archives of mods. */
+    private void pickMods() {
+        startActivityForResult(new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                .setType("*/*").putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), PICK_MODS);
+    }
+
     /** What the save import takes and where to get it, then the system file picker for the zip. */
     private void askImportSaves() {
         String message = "Pick a zip of a Darkest Dungeon save folder, the folder that holds profile_0, "
@@ -505,7 +555,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             saveTask("Importing saves.", "Saves imported", "Couldn't import saves", () -> unpackSaves(data.getData()));
         if (requestCode == EXPORT_SAVES && data.getData() != null)
             saveTask("Exporting saves.", "Saves exported", "Couldn't export saves", () -> exportSaves(data.getData()));
-        if (requestCode != PICK_INSTALLER)
+        if (requestCode != PICK_INSTALLER && requestCode != PICK_MODS)
             return;
         List<Uri> files = new ArrayList<>();
         if (data.getClipData() != null)   // several files picked
@@ -513,7 +563,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 files.add(data.getClipData().getItemAt(i).getUri());
         else if (data.getData() != null)
             files.add(data.getData());
-        if (!files.isEmpty())
+        if (files.isEmpty())
+            return;
+        if (requestCode == PICK_MODS)
+            saveTask("Adding mods.", "Mods added", "Couldn't add mods", () -> unpackMods(files));
+        else
             importGame(files);
     }
 
@@ -535,8 +589,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Runs a save import or export on a background thread behind a progress screen (so Play can't
-     * start the game meanwhile), then opens the launch screen with its message, or with why it failed.
+     * Runs a save import or export, or a mod import, on a background thread behind a progress screen
+     * (so Play can't start the game meanwhile), then opens the launch screen with its message, or with
+     * why it failed.
      */
     private void saveTask(String busy, String doneTitle, String failedTitle, Callable<String> task) {
         progressScreen(busy).setIndeterminate(true);
@@ -1534,6 +1589,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return new File(gameDir(), GAME_BINARY);
     }
 
+    /** The game's mods: a folder per mod (see unpackMods). */
+    private File modsDir() {
+        return new File(gameDir(), "mods");
+    }
+
     /** The game's save folder: ddglue's SDL_GetPrefPath("Red Hook Studios", "Darkest") under DD_HOME. */
     private File savesDir() {
         return new File(getFilesDir(), ".local/share/Red Hook Studios/Darkest");
@@ -1654,9 +1714,13 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return "Tap Play, and the campaigns are in the game's save list.";
     }
 
-    /** A zip entry's name with / between folders and no leading ./ or /, as Windows tools may write them. */
     private static String entryName(ZipEntry e) {
-        String name = e.getName().replace('\\', '/');
+        return entryName(e.getName());
+    }
+
+    /** An archive entry's name with / between folders and no leading ./ or /, as Windows tools may write them. */
+    private static String entryName(String name) {
+        name = name.replace('\\', '/');
         while (name.startsWith("/") || name.startsWith("./"))
             name = name.substring(name.startsWith("/") ? 1 : 2);
         return name;
@@ -1689,6 +1753,221 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             throw new IOException("That zip holds more than one save folder (" + names(roots)
                     + "). Please zip only the one to import.");
         return roots.get(0);
+    }
+
+    /** An installed mod: its folder in mods/ and its title (the folder's name if it has none). */
+    private static final class Mod {
+        final File dir;
+        final String title;
+
+        Mod(File dir, String title) {
+            this.dir = dir;
+            this.title = title;
+        }
+    }
+
+    /** The folders in mods/ that hold a project.xml, by title. */
+    private List<Mod> installedMods() {
+        List<Mod> mods = new ArrayList<>();
+        File[] dirs = modsDir().listFiles();
+        if (dirs != null)
+            for (File dir : dirs) {
+                File project = new File(dir, PROJECT_FILE);
+                if (!project.isFile())
+                    continue;
+                String title = "";
+                try {
+                    title = projectJson(project).optString("Title").trim();
+                } catch (IOException e) {
+                    Log.w(TAG, "unreadable " + project, e);
+                }
+                mods.add(new Mod(dir, title.isEmpty() ? dir.getName().replaceFirst("\\.json$", "") : title));
+            }
+        mods.sort(Comparator.comparing(m -> m.title.toLowerCase(Locale.ROOT)));
+        return mods;
+    }
+
+    /**
+     * Adds the mods in the picked archives. A mod is a folder holding a project.xml (the archive's root
+     * counts); one inside another is part of it. Each goes to mods/<title>.json/ with its project.xml rewritten as
+     * JSON: the game's XML reader (UGCProjectMetadata::ReadXMLFile) drops every value, so a mod read from
+     * XML has no title, and all such mods share one empty id in saves. Its JSON reader works, and the game
+     * uses it whenever the path holds ".json". An installed mod with the same title or folder is replaced.
+     * The archives are unpacked into mods.import/ first, so a half-unpacked mod never shows in the game.
+     */
+    private String unpackMods(List<Uri> files) throws IOException {
+        File tmp = new File(gameDir().getParentFile(), "mods.import");
+        deleteTree(tmp);   // left by an import that didn't finish
+        try {
+            List<File> unpacked = new ArrayList<>();
+            List<String> fallbackTitles = new ArrayList<>();   // for a mod without a title
+            for (Uri file : files)
+                unpackModArchive(file, tmp, unpacked, fallbackTitles);
+            List<String> added = new ArrayList<>();
+            for (int i = 0; i < unpacked.size(); i++) {
+                File dir = unpacked.get(i), project = new File(dir, PROJECT_FILE);
+                JSONObject json = projectJson(project);
+                String title = json.optString("Title").trim();
+                if (title.isEmpty())
+                    title = fallbackTitles.get(i);
+                try {
+                    json.put("Title", title);
+                    if (!json.has("ModDataPath"))   // required by the game, though not used
+                        json.put("ModDataPath", "");
+                    Files.write(project.toPath(), json.toString(1).getBytes(StandardCharsets.UTF_8));
+                } catch (org.json.JSONException e) {   // only for a non-finite number, which never comes
+                    throw new IOException(e);
+                }
+                String folder = folderName(title) + ".json";
+                for (Mod mod : installedMods())
+                    if (mod.title.equals(title) || mod.dir.getName().equalsIgnoreCase(folder))
+                        deleteTree(mod.dir);
+                File dest = new File(modsDir(), folder);
+                deleteTree(dest);   // a folder of that name without a project.xml
+                modsDir().mkdirs();
+                if (!dir.renameTo(dest))
+                    throw new IOException("Couldn't move the mod into place: " + dir + " → " + dest);
+                if (!added.contains(title))
+                    added.add(title);
+            }
+            return names(added) + (added.size() > 1 ? " are" : " is") + " installed.";
+        } finally {
+            deleteTree(tmp);
+        }
+    }
+
+    /**
+     * Unpacks each mod in the picked archive (zip, 7z or RAR) into a new folder in tmp, adding the folders
+     * to `unpacked` and their names in the archive ("Mod" for its root) to `fallbackTitles`. The archive is
+     * read twice, first for its names, then to unpack. A mod's project.xml lands as project.xml whatever
+     * the case of its name; macOS's __MACOSX/ folder is left out, and so are links.
+     */
+    private void unpackModArchive(Uri file, File tmp, List<File> unpacked, List<String> fallbackTitles)
+            throws IOException {
+        try (ParcelFileDescriptor fd = getContentResolver().openFileDescriptor(file, "r")) {
+            List<String> names = new ArrayList<>();
+            try (ArchiveInputStream in = new ArchiveInputStream(fd)) {
+                for (String name; (name = in.nextEntry()) != null; )
+                    names.add(entryName(name));
+            } catch (ArchiveInputStream.ReadException e) {
+                throw new IOException(e.encrypted ? ENCRYPTED : names.isEmpty() ? NOT_AN_ARCHIVE : DAMAGED, e);
+            }
+            List<String> roots = modRoots(names);
+
+            int first = unpacked.size();
+            for (String root : roots) {
+                File dir = new File(tmp, Integer.toString(unpacked.size()));
+                dir.mkdirs();
+                unpacked.add(dir);
+                fallbackTitles.add(root.isEmpty() ? "Mod"
+                        : root.substring(root.lastIndexOf('/', root.length() - 2) + 1, root.length() - 1));
+            }
+            try (ArchiveInputStream in = new ArchiveInputStream(fd)) {
+                for (String entry; (entry = in.nextEntry()) != null; ) {
+                    String name = entryName(entry);
+                    int r = 0;
+                    while (r < roots.size() && !name.startsWith(roots.get(r)))
+                        r++;
+                    if (r == roots.size() || name.length() == roots.get(r).length() || name.startsWith("__MACOSX/")
+                            || !in.isFile() && !in.isDirectory())
+                        continue;
+                    File dir = unpacked.get(first + r);
+                    String rest = name.substring(roots.get(r).length());
+                    File out = new File(dir, rest.equalsIgnoreCase(PROJECT_FILE) ? PROJECT_FILE : rest);
+                    if (!out.getCanonicalPath().startsWith(dir.getCanonicalPath() + "/"))
+                        throw new IOException("The archive looks damaged (unexpected file name: " + entry + ").");
+                    if (in.isDirectory()) {
+                        out.mkdirs();
+                        continue;
+                    }
+                    if (in.isEncrypted())
+                        throw new IOException(ENCRYPTED);
+                    out.getParentFile().mkdirs();
+                    try (OutputStream o = new FileOutputStream(out)) {
+                        copy(in, o);
+                    }
+                    if (in.time() >= 0)
+                        out.setLastModified(in.time());
+                }
+            } catch (ArchiveInputStream.ReadException e) {
+                throw new IOException(e.encrypted ? ENCRYPTED : DAMAGED, e);
+            }
+        }
+    }
+
+    /**
+     * The mods among an archive's names: the folders holding a project.xml, with a / at their end ("" for
+     * the archive's root), shallowest first. A project.xml inside a mod's folder is part of that mod.
+     */
+    private static List<String> modRoots(List<String> names) throws IOException {
+        List<String> found = new ArrayList<>();
+        for (String name : names) {
+            int slash = name.lastIndexOf('/');
+            if (name.substring(slash + 1).equalsIgnoreCase(PROJECT_FILE) && !name.startsWith("__MACOSX/"))
+                found.add(name.substring(0, slash + 1));
+        }
+        found.sort(Comparator.comparingInt(String::length));
+        List<String> roots = new ArrayList<>();
+        outer:
+        for (String root : found) {
+            for (String r : roots)
+                if (root.startsWith(r))
+                    continue outer;
+            roots.add(root);
+        }
+        if (roots.isEmpty())
+            throw new IOException(NOT_A_MOD);
+        return roots;
+    }
+
+    /**
+     * A mod's project.xml as the JSON object the game's JSON reader takes: as it is if it is JSON already
+     * (a mod this app added), else the <project> element's fields named in PROJECT_STRINGS and
+     * PROJECT_NUMBERS (a number that doesn't parse becomes 0).
+     */
+    private static JSONObject projectJson(File project) throws IOException {
+        byte[] bytes = Files.readAllBytes(project.toPath());
+        String text = new String(bytes, StandardCharsets.UTF_8).replace("﻿", "").trim();
+        try {
+            if (text.startsWith("{"))
+                return new JSONObject(text);
+            Element root = DocumentBuilderFactory.newInstance().newDocumentBuilder()
+                    .parse(new ByteArrayInputStream(bytes)).getDocumentElement();
+            if (!root.getNodeName().equals("project"))
+                throw new IOException("A mod's project.xml has no <project> in it.");
+            JSONObject json = new JSONObject();
+            for (Node n = root.getFirstChild(); n != null; n = n.getNextSibling()) {
+                String name = n.getNodeName();
+                if (PROJECT_STRINGS.contains(name))
+                    json.put(name, n.getTextContent());
+                else if (PROJECT_NUMBERS.contains(name))
+                    json.put(name, uint(n.getTextContent()));
+            }
+            return json;
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {   // JSONException, SAXException, ParserConfigurationException
+            throw new IOException("A mod's project.xml can't be read: " + e.getMessage(), e);
+        }
+    }
+
+    /** text as a 32-bit unsigned number; 0 if it isn't one. */
+    private static long uint(String text) {
+        try {
+            long n = Long.parseLong(text.trim());
+            return n >= 0 && n <= 0xffffffffL ? n : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /** A mod's title as a folder name: letters, digits and a few signs kept, others as _, at most 48 long. */
+    private static String folderName(String title) {
+        String name = title.replaceAll("[^A-Za-z0-9 ._()-]", "_");
+        if (name.length() > 48)   // the game keeps paths under mods/ in 256 characters
+            name = name.substring(0, 48);
+        name = name.replaceAll("^[ .]+|[ .]+$", "");
+        return name.isEmpty() ? "mod" : name;
     }
 
     /**

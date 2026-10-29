@@ -4,6 +4,7 @@
 #   $DD_BUILD/out/jniLibs/arm64-v8a/libbox64.so   box64 as a shared library (glibc-on-bionic patch)
 #   $DD_BUILD/out/jniLibs/arm64-v8a/libGL.so      gl4es
 #   $DD_BUILD/out/assets/x64lib/                   x86_64 libstdc++.so.6, libgcc_s.so.1 (Debian 12)
+#   $DD_BUILD/out/archive/{include,lib}/           libarchive + liblzma, static, for the app's mod import
 # SDL2 is only fetched (and patched) here; Gradle builds it with the app.
 # Needs: Android SDK with NDK 27.1.12297006 and CMake 3.22.1 + 4.1.2, git, curl, Python 3 (box64's
 # wrapper generator), Windows bsdtar for .deb files.
@@ -18,6 +19,8 @@ PATCHES=$(cd "$(dirname "$0")/patches" && pwd)
 BOX64_COMMIT=d96343fbb          # same as the chroot build on the phone
 GL4ES_COMMIT=a025615b           # master after the Adreno highp fixes (PR #509)
 SDL2_TAG=release-2.32.10
+LIBARCHIVE_COMMIT=0c48412be     # v3.8.10
+XZ_COMMIT=d3e650e63             # v5.8.4
 DEB=https://snapshot.debian.org/archive/debian/20250415T084322Z/pool/main/g/gcc-12   # permanent; the live pool drops old versions
 DEB_VER=12.2.0-14+deb12u1
 
@@ -39,6 +42,8 @@ fetch gl4es https://github.com/ptitSeb/gl4es.git $GL4ES_COMMIT gl4es-android.pat
     gl4es-3d-textures.patch gl4es-negative-box-cache.patch gl4es-client-array-range.patch \
     gl4es-pvr-packed-depth-stencil.patch
 fetch SDL2 https://github.com/libsdl-org/SDL.git $SDL2_TAG sdl2-no-java.patch
+fetch libarchive https://github.com/libarchive/libarchive.git $LIBARCHIVE_COMMIT
+fetch xz https://github.com/tukaani-project/xz.git $XZ_COMMIT
 
 ndk_cmake() {  # ndk_cmake SRC BUILD [cmake args...]
     local src=$1 build=$2; shift 2
@@ -52,6 +57,23 @@ ndk_cmake "$DD_BUILD/src/box64" "$DD_BUILD/build/box64-lib" -DARM_DYNAREC=1 -DBA
 ndk_cmake "$DD_BUILD/src/gl4es" "$DD_BUILD/build/gl4es" -DNOX11=ON -DNOEGL=ON -DNO_LOADER=ON \
     -DNO_INIT_CONSTRUCTOR=ON -DUSE_ANDROID_LOG=ON
 cp "$DD_BUILD/build/box64-lib/libbox64.so" "$DD_BUILD/src/gl4es/lib/libGL.so" "$DD_BUILD/out/jniLibs/arm64-v8a/"
+
+# libarchive reads the mod archives (zip, 7z, RAR); liblzma is 7z's compression. Static, linked into
+# the app's libddarchive.so. Only the library: no tools, tests or crypto (encrypted archives aren't read)
+ndk_cmake "$DD_BUILD/src/xz" "$DD_BUILD/build/xz" -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    -DXZ_NLS=OFF -DXZ_DOC=OFF -DXZ_TOOL_XZ=OFF -DXZ_TOOL_XZDEC=OFF -DXZ_TOOL_LZMADEC=OFF -DXZ_TOOL_LZMAINFO=OFF \
+    -DXZ_TOOL_SCRIPTS=OFF
+ndk_cmake "$DD_BUILD/src/libarchive" "$DD_BUILD/build/libarchive" -DBUILD_SHARED_LIBS=OFF \
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DENABLE_INSTALL=OFF -DENABLE_TEST=OFF -DENABLE_TAR=OFF \
+    -DENABLE_CPIO=OFF -DENABLE_CAT=OFF -DENABLE_UNZIP=OFF -DENABLE_OPENSSL=OFF -DENABLE_MD=OFF \
+    -DENABLE_LIBB2=OFF -DENABLE_LZ4=OFF -DENABLE_ZSTD=OFF -DENABLE_BZip2=OFF -DENABLE_LIBXML2=OFF \
+    -DENABLE_BSDXML=OFF -DENABLE_EXPAT=OFF -DENABLE_PCREPOSIX=OFF -DENABLE_PCRE2POSIX=OFF -DENABLE_LIBGCC=OFF \
+    -DENABLE_XATTR=OFF -DENABLE_ACL=OFF -DLIBLZMA_INCLUDE_DIR="$DD_BUILD/src/xz/src/liblzma/api" \
+    -DLIBLZMA_LIBRARY="$DD_BUILD/build/xz/liblzma.a"
+rm -rf "$DD_BUILD/out/archive" && mkdir -p "$DD_BUILD/out/archive/include" "$DD_BUILD/out/archive/lib"
+cp "$DD_BUILD/src/libarchive/libarchive/archive.h" "$DD_BUILD/src/libarchive/libarchive/archive_entry.h" \
+    "$DD_BUILD/out/archive/include/"
+cp "$DD_BUILD/build/libarchive/libarchive/libarchive.a" "$DD_BUILD/build/xz/liblzma.a" "$DD_BUILD/out/archive/lib/"
 
 # x86_64 C++ runtime for the game: box64 doesn't wrap libstdc++/libgcc_s on Android
 for pkg in libstdc++6 libgcc-s1; do
