@@ -448,12 +448,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     /** The Mods page's "?": how mods get onto the phone, from the Steam Workshop or from a site. */
     private void explainMods() {
-        String subscribed = "If the game is installed on the PC, it can take the mods you subscribed to instead.";
+        String subscribed = "If the game is installed on the PC, it can take the mods you subscribed to.";
         String message = "Add mods takes zip, 7z or RAR files, with one or more mods in each.\n\n"
                 + "From the Steam Workshop (a Windows PC with Steam; the game doesn't need to be installed there):\n"
                 + "•  Run get-steam-mods.bat from the Releases page while Steam is running and logged in.\n"
-                + "•  Paste the Workshop links of the mods you want, one per line, then an empty line. "
-                + subscribed + "\n"
+                + "•  " + subscribed + " Else, paste the Workshop links of the mods you want, one per line, "
+                + "then an empty line.\n"
                 + "•  It downloads them through Steam and packs them into darkest-dungeon-mods.zip next to it. "
                 + "Copy that zip to the phone and pick it with Add mods.\n\n"
                 + "From Nexus Mods and other sites: download the mod's file, on the phone or on a PC and copy it "
