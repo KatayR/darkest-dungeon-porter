@@ -81,6 +81,7 @@ Project rules learned from mistakes made during the port.
 - Python edits to Windows paths: a backslash-t in a normal string literal is a tab (`System32\tar.exe` broke this way, twice). Use raw strings, or edit the file directly in an editor.
 
 ## Release notes
+- Run `git fetch` and compare with `origin/main` before starting work and again before a commit, version bump or release: the owner also commits from another computer. A day of mods work started on a checkout four commits behind (0.5.2 and a fix pushed elsewhere), so the app still said 0.5.1 and the next version had to be worked out from the remote.
 - A release's notes hold only what is new in it and the signing certificate's SHA-256, nothing else: no intro line ("Runs your own GOG or Steam copy…"), no install steps, no test list, no README pointer. Those belong in the README; copied into each release, they repeat down the whole Releases page.
 
 ## App lifecycle

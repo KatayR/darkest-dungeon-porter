@@ -40,15 +40,15 @@ Other devices may work. Reports are welcome.
      2. Download `get-steam-game.bat` from the [Releases page](https://github.com/KatayR/darkest-dungeon-porter/releases) (or [from the repo](port/steam/get-steam-game.bat)) and double-click it.
         - It asks the running Steam to download the game's Linux files (and the DLCs you own) to Steam's `steamapps\content` folder, then packs what the phone needs into `darkest-dungeon-steam.zip` next to the bat.
      3. Copy `darkest-dungeon-steam.zip` to the phone.
-3. Open **Darkest Dungeon Porter** and tap **Import game**, then pick the installer or the zip.
+3. Open **Darkest Dungeon Porter**, tap **Game files**, then **Import game**, and pick the installer or the zip.
    - To import GOG's DLC installers at the same time, long-press to select them together with the game's installer.
-   - DLCs can also be added later: tap **Add DLC** on the launch screen and pick their installers.
+   - DLCs can also be added later: **Game files** → **Add DLC**, then pick their installers.
    - The app unpacks only the game data and converts six shaders to OpenGL ES.
    - You can delete the installers or zip afterwards.
-4. Choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
+4. Under **Display**, choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then go back and tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
 
 ## Saves
-Saves are kept in the app's private storage, so uninstalling the app deletes them. The **Save file** card on the launch screen copies them out and back in:
+Saves are kept in the app's private storage, so uninstalling the app deletes them. **Save file** on the launch screen copies them out and back in:
 - **Export** writes them to a zip, wherever you pick (e.g. `Download/`). Keep it before uninstalling the app, or use it to move your saves to another phone.
 - **Import** replaces the saves on the phone with the ones in a zip.
   - The save folder (the one holding `profile_0`, `profile_1`, …) can be anywhere inside the zip.
@@ -60,7 +60,7 @@ Saves are kept in the app's private storage, so uninstalling the app deletes the
 - Saves move between the Steam and GOG builds as they are: Windows Steam saves loaded on the phone with both.
 
 ## Mods
-Once the game is imported, the **Mods** card on the launch screen lists the installed mods. **Add mods** takes one or more zip, 7z or RAR files of mods:
+Once the game is imported, **Mods** on the launch screen lists the installed mods. **Add mods** there takes one or more zip, 7z or RAR files of mods:
 - A mod is a folder with a `project.xml` in it, as Workshop mods come. One archive can hold many mods, at any depth.
 - Mods without a `project.xml`, as many Nexus mods come, work too: a folder laid out like the game's own (`heroes/`, `trinkets/`, `dlc/`, ...) is a mod, named after the archive ("Better Trinkets v2.03-76-v2-03.rar" becomes "Better Trinkets v2.03").
 - A mod that is already installed (same title) is replaced, so adding a newer version updates it.

@@ -11,7 +11,9 @@ import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Insets;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.hardware.input.InputManager;
 import android.net.Uri;
 import android.os.Build;
@@ -23,6 +25,7 @@ import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.system.Os;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.ContextThemeWrapper;
 import android.view.Gravity;
@@ -41,10 +44,13 @@ import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -104,8 +110,9 @@ import org.w3c.dom.Node;
  * imports them from one (see unpackSaves), so they can outlive an uninstall and move between devices.
  * Mods come from zip, 7z or RAR files into the game's mods/ folder (see unpackMods).
  *
- * A launch screen picks the resolution and frame rate first (lower ones save battery); the intent
- * extras "height" and "fps" skip it.
+ * A launch screen comes first: Play, and rows that open pages for the game files, the mods, the save
+ * file and the display (the resolution and frame rate; lower ones save battery). The intent extras
+ * "height" and "fps" skip it.
  *
  * Touch works like a laptop trackpad by default: one finger moves the cursor, a tap clicks, a
  * two-finger tap right-clicks, tap then hold drags. In touch mode the finger is the mouse instead:
@@ -152,7 +159,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private static final String MOD_FILES = "modfiles.txt";
     // colours of the launch and import screens
     private static final int BACKGROUND = 0xFF121214, CARD = 0xFF1D1D21, TEXT = 0xFFF2F2F2, MUTED = 0xFFA4A4AC,
-            BUTTON = 0xFF2E2E35, ACCENT = 0xFFD9A441, ON_ACCENT = 0xFF1C1607;
+            BUTTON = 0xFF2E2E35, ACCENT = 0xFFD9A441, ON_ACCENT = 0xFF1C1607, DIVIDER = 0xFF2A2A30,
+            RIPPLE = 0x33FFFFFF;
 
     static {
         System.loadLibrary("ddview");
@@ -189,6 +197,12 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private View touchOptions;  // on the card in touch mode: the cursor and how to right-click
     private TextView rightClickNote;   // under it: the chosen way's pros and cons
 
+    /** The launch screen's pages: the hub, and the page each of its rows opens. */
+    private enum Page { HUB, GAME_FILES, MODS, SAVE_FILE, DISPLAY }
+
+    private Page page = Page.HUB;   // the one the launch screen shows
+    private View launchScreen;      // the launch screen while it is up (not a progress screen or the game)
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -207,32 +221,300 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     }
 
     /**
-     * Cards: the resolution and frame rate on the left, with the save file's import and export under
-     * them and, once the game is imported, its mods under those; importing the game or its DLCs, and
-     * what is imported so far, on the right. Play is
-     * below them, in the middle, once the game is imported. A message from the last import or export,
-     * if any, opens in a dialog with the title given.
+     * The launch screen: the hub, or the page of one of its rows (`page`), which Back closes. A message
+     * from the last import or export, if any, opens in a dialog with the title given, over the page it
+     * was started from.
      */
     private void showLaunchScreen(String dialogTitle, String dialogMessage) {
         boolean installed = gameBinary().exists();
-        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        if (page == Page.MODS && !installed)   // mods need the game
+            page = Page.HUB;
         Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
-        Spinner heights = dropdown(c, h -> h * 16 / 9 + " × " + h + (h == 2160 ? " (4K)" : ""), HEIGHTS,
-                prefs.getInt("height", DEFAULT_HEIGHT));
-        Spinner rates = dropdown(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
-        LinearLayout settings = card(c);
-        settings.setBackground(rounded(c));
-        settings.addView(heading(c, "Settings"));
-        settings.addView(text(c, "Resolution (lower saves battery)", 14, MUTED), below(c, 12));
-        settings.addView(heights, below(c, 4));
-        settings.addView(text(c, "Frame rate (lower saves battery)", 14, MUTED), below(c, 16));
-        settings.addView(rates, below(c, 4));
+        launchScreen = page == Page.HUB ? hub(c, installed) : page(c, installed);
+        setContentView(launchScreen);
+        if (dialogMessage != null)   // what the last import has to say
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle(dialogTitle)
+                    .setMessage(dialogMessage)
+                    .setPositiveButton(android.R.string.ok, null)
+                    .show();
+    }
 
-        // the save file card under the settings: Import and Export side by side
-        LinearLayout saves = card(c);
-        saves.setBackground(rounded(c));
-        saves.addView(heading(c, "Save file"));
-        LinearLayout saveButtons = new LinearLayout(c);
+    private void openPage(Page to) {
+        page = to;
+        showLaunchScreen(null, null);
+    }
+
+    /**
+     * The hub: at the left a row per page, each with a one-line summary (Mods only once the game is
+     * imported); at the right the game, what is imported and Play, with the app's version under them.
+     */
+    private View hub(Context c, boolean installed) {
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        int height = prefs.getInt("height", DEFAULT_HEIGHT), fps = prefs.getInt("fps", FPS[0]);
+        List<String> dlcs = installed ? imported().subList(1, imported().size()) : new ArrayList<>();
+        int mods = installed ? installedMods().size() : 0;
+        String store = gogGame() ? "GOG" : "Steam";
+
+        LinearLayout rows = new LinearLayout(c);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        rows.setBackground(rounded(c));
+        rows.setClipToOutline(true);   // the rows' ripples keep to the card's corners
+        addRow(rows, row(c, R.drawable.ic_game, "Game files",
+                !installed ? "Not imported yet" : dlcs.isEmpty() ? store : store + " · " + String.join(", ", dlcs),
+                Page.GAME_FILES));
+        if (installed)
+            addRow(rows, row(c, R.drawable.ic_mods, "Mods", mods == 0 ? "None yet" : mods + " installed", Page.MODS));
+        addRow(rows, row(c, R.drawable.ic_saves, "Save file", hasSaves() ? "Import or export" : "No saves yet",
+                Page.SAVE_FILE));
+        addRow(rows, row(c, R.drawable.ic_display, "Display", resolution(height) + " · " + fps + " FPS", Page.DISPLAY));
+
+        LinearLayout game = column(c);
+        TextView name = text(c, "Darkest Dungeon", 30, TEXT);
+        name.setTypeface(null, Typeface.BOLD);
+        game.addView(name, wrap());
+        String summary = store;
+        if (!dlcs.isEmpty())
+            summary += " · " + dlcs.size() + " DLC";
+        if (mods > 0)
+            summary += " · " + mods + (mods == 1 ? " mod" : " mods");
+        game.addView(text(c, installed ? summary : "Import the game to play.", 14, MUTED), below(c, 4));
+        Button play = button(c, "Play", ACCENT, ON_ACCENT);
+        play.setTextSize(20);
+        play.setMinWidth(dp(c, 260));
+        play.setMinHeight(dp(c, 56));
+        play.setOnClickListener(b -> start(height, fps));
+        play.setEnabled(installed);
+        if (!installed) {
+            play.setBackgroundTintList(ColorStateList.valueOf(BUTTON));
+            play.setTextColor(MUTED);
+        }
+        game.addView(play, below(c, 20));
+        FrameLayout right = new FrameLayout(c);   // the game in the middle, the app's version at the bottom right
+        right.addView(game, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        right.addView(text(c, "v" + versionName(), 12, MUTED), new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.END | Gravity.BOTTOM));
+
+        LinearLayout layout = new LinearLayout(c);
+        layout.setBackgroundColor(BACKGROUND);
+        layout.setPadding(dp(c, 24), dp(c, 16), dp(c, 24), dp(c, 12));
+        layout.addView(rows, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1);
+        lp.leftMargin = dp(c, 24);
+        layout.addView(right, lp);
+        return layout;
+    }
+
+    /** A hub row: an icon, the title with a one-line summary under it, and a chevron. It opens `to`. */
+    private LinearLayout row(Context c, int icon, String title, String summary, Page to) {
+        LinearLayout row = new LinearLayout(c);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(c, 18), 0, dp(c, 18), 0);
+        row.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), null, new ColorDrawable(CARD)));
+        row.setOnClickListener(v -> openPage(to));
+        LinearLayout.LayoutParams iconSize = new LinearLayout.LayoutParams(dp(c, 22), dp(c, 22));
+        iconSize.rightMargin = dp(c, 14);
+        row.addView(icon(c, icon, MUTED), iconSize);
+        LinearLayout texts = new LinearLayout(c);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t = text(c, title, 16, TEXT);
+        t.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        texts.addView(t);
+        TextView s = text(c, summary, 13, MUTED);
+        s.setSingleLine();
+        s.setEllipsize(TextUtils.TruncateAt.END);
+        texts.addView(s, below(c, 2));
+        row.addView(texts, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        row.addView(icon(c, R.drawable.ic_chevron, MUTED), new LinearLayout.LayoutParams(dp(c, 18), dp(c, 18)));
+        return row;
+    }
+
+    /** Adds a row to the hub's card, sharing its height with the others, after a divider if not the first. */
+    private static void addRow(LinearLayout rows, View row) {
+        if (rows.getChildCount() > 0)
+            rows.addView(divider(rows.getContext()));
+        rows.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
+    }
+
+    private static View divider(Context c) {
+        View line = new View(c);
+        line.setBackgroundColor(DIVIDER);
+        line.setLayoutParams(new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(c, 1)));
+        return line;
+    }
+
+    private static ImageView icon(Context c, int drawable, int color) {
+        ImageView v = new ImageView(c);
+        v.setImageResource(drawable);
+        v.setImageTintList(ColorStateList.valueOf(color));
+        return v;
+    }
+
+    /**
+     * A page of the launch screen: Back, its title and its action (if any) at the top, its content in a
+     * card below.
+     */
+    private View page(Context c, boolean installed) {
+        ImageButton back = new ImageButton(c);
+        back.setImageResource(R.drawable.ic_back);
+        back.setImageTintList(ColorStateList.valueOf(TEXT));
+        back.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(), null));
+        back.setContentDescription("Back");
+        back.setOnClickListener(v -> openPage(Page.HUB));
+        LinearLayout top = new LinearLayout(c);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.addView(back, new LinearLayout.LayoutParams(dp(c, 44), dp(c, 44)));
+
+        LinearLayout card = card(c);
+        String title;
+        Button help = null, action = null;
+        switch (page) {
+            case GAME_FILES:
+                title = "Game files";
+                gameFilesPage(c, card, installed);
+                action = button(c, installed ? "Add DLC" : "Import game", BUTTON, TEXT);
+                action.setOnClickListener(b -> pickFiles());
+                break;
+            case MODS:
+                title = "Mods";
+                modsPage(c, card);
+                help = new Button(c);
+                help.setText("?");
+                help.setTextSize(20);
+                help.setTextColor(TEXT);
+                help.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                help.setMinWidth(0);
+                help.setMinimumWidth(0);
+                help.setMinHeight(0);
+                help.setMinimumHeight(0);
+                help.setPadding(0, 0, 0, 0);
+                help.setBackground(new RippleDrawable(ColorStateList.valueOf(RIPPLE), circle(), null));
+                help.setContentDescription("How to get mods");
+                help.setOnClickListener(b -> explainMods());
+                action = button(c, "Add mods", BUTTON, TEXT);
+                action.setOnClickListener(b -> pickMods());
+                break;
+            case SAVE_FILE:
+                title = "Save file";
+                saveFilePage(c, card);
+                break;
+            default:
+                title = "Display";
+                displayPage(c, card);
+        }
+        TextView heading = heading(c, title);
+        heading.setTextSize(22);
+        LinearLayout.LayoutParams fill = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        fill.leftMargin = dp(c, 12);
+        top.addView(heading, fill);
+        if (help != null) {
+            LinearLayout.LayoutParams round = new LinearLayout.LayoutParams(dp(c, 44), dp(c, 44));
+            round.rightMargin = dp(c, 12);
+            top.addView(help, round);
+        }
+        if (action != null) {
+            action.setMinWidth(dp(c, 170));
+            top.addView(action, wrap());
+        }
+        ScrollView body = new ScrollView(c);   // as tall as its content, up to the screen: then it scrolls
+        body.setBackground(rounded(c));
+        body.setClipToOutline(true);
+        body.addView(card);
+
+        LinearLayout layout = new LinearLayout(c);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setBackgroundColor(BACKGROUND);
+        layout.setPadding(dp(c, 24), dp(c, 16), dp(c, 24), dp(c, 16));
+        layout.addView(top, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams under = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        under.topMargin = dp(c, 14);
+        layout.addView(body, under);
+        return layout;
+    }
+
+    /** A round button's background: a circle in the card's colour. */
+    private static GradientDrawable circle() {
+        GradientDrawable circle = new GradientDrawable();
+        circle.setShape(GradientDrawable.OVAL);
+        circle.setColor(CARD);
+        return circle;
+    }
+
+    /** The Mods page's "?": how mods get onto the phone, from the Steam Workshop or from a site. */
+    private void explainMods() {
+        String message = "Add mods takes zip, 7z or RAR files, with one or more mods in each.\n\n"
+                + "From the Steam Workshop (a Windows PC with Steam; the game doesn't need to be installed there):\n"
+                + "•  Run get-steam-mods.bat from the Releases page while Steam is running and logged in.\n"
+                + "•  Paste the Workshop links of the mods you want, one per line, then an empty line. With the "
+                + "game installed on the PC, it can take the mods you subscribed to instead.\n"
+                + "•  It downloads them through Steam and packs them into darkest-dungeon-mods.zip next to it. "
+                + "Copy that zip to the phone and pick it with Add mods.\n\n"
+                + "From Nexus Mods and other sites: download the mod's file, on the phone or on a PC and copy it "
+                + "over, and pick it with Add mods. Archives with a password or split into parts need to be "
+                + "unpacked on a PC and zipped again.\n\n"
+                + "Adding a mod that is already installed replaces it, so a newer version updates it.";
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Getting mods")
+                .setMessage(message)
+                .setNeutralButton("Releases page", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("https://github.com/KatayR/darkest-dungeon-porter/releases"))))
+                .setNegativeButton("Close", null)
+                .setPositiveButton("Add mods", (d, w) -> pickMods())
+                .show();
+    }
+
+    /** Game files: what is imported, or what the import takes while the game is missing. */
+    private void gameFilesPage(Context c, LinearLayout card, boolean installed) {
+        if (installed) {
+            TextView title = text(c, "Imported", 12, MUTED);
+            title.setAllCaps(true);
+            title.setLetterSpacing(0.1f);
+            card.addView(title);
+            List<String> imported = imported();
+            for (int i = 0; i < imported.size(); i++) {
+                TextView item = text(c, "✓  " + imported.get(i), 16, TEXT);
+                if (i > 0)   // the DLCs, after the game
+                    item.setTypeface(null, Typeface.ITALIC);
+                card.addView(item, below(c, 4));
+            }
+            card.addView(text(c, "Pick one or more of GOG's DLC installers.", 14, MUTED), below(c, 16));
+        } else {
+            card.addView(text(c, "Pick one of these:", 14, MUTED));
+            card.addView(source(c, "GOG's Linux installer", "darkest_dungeon_…_linux_….sh"), below(c, 4));
+            card.addView(source(c, "The Steam zip", "darkest-dungeon-steam.zip"), below(c, 4));
+            card.addView(text(c, "For GOG, DLC installers can be picked together with the game. "
+                    + "The Steam zip already has your DLCs.", 14, MUTED), below(c, 8));
+        }
+    }
+
+    /** Mods: each installed mod by its title, two to a line. */
+    private void modsPage(Context c, LinearLayout card) {
+        List<Mod> mods = installedMods();
+        if (mods.isEmpty())
+            card.addView(text(c, "None yet. Add takes zip, 7z or RAR files with one or more mods in them.", 14, MUTED));
+        for (int i = 0; i < mods.size(); i += 2) {
+            if (i > 0)
+                card.addView(divider(c));
+            LinearLayout pair = new LinearLayout(c);
+            for (int j = i; j < i + 2; j++) {
+                TextView t = text(c, j < mods.size() ? mods.get(j).title : "", 16, TEXT);
+                t.setPadding(0, dp(c, 10), 0, dp(c, 10));
+                LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+                if (j == i)
+                    half.rightMargin = dp(c, 32);
+                pair.addView(t, half);
+            }
+            card.addView(pair, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+    }
+
+    /** Save file: Import and Export side by side (Export only once there are saves). */
+    private void saveFilePage(Context c, LinearLayout card) {
+        LinearLayout buttons = new LinearLayout(c);
         Button importSaves = button(c, "Import", BUTTON, TEXT);
         importSaves.setOnClickListener(b -> askImportSaves());
         Button exportSaves = button(c, "Export", BUTTON, TEXT);
@@ -242,108 +524,46 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         if (!hasSaves)
             exportSaves.setTextColor(MUTED);
         for (Button b : new Button[] { importSaves, exportSaves }) {
-            b.setMinWidth(0);   // two share the narrow card
             LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
             if (b == importSaves)
                 half.rightMargin = dp(c, 8);
-            saveButtons.addView(b, half);
+            buttons.addView(b, half);
         }
-        saves.addView(saveButtons, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+        card.addView(buttons, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT));
-        LinearLayout leftCards = new LinearLayout(c);
-        leftCards.setOrientation(LinearLayout.VERTICAL);
-        leftCards.addView(settings, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        LinearLayout.LayoutParams underSettings = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        underSettings.topMargin = dp(c, 12);
-        leftCards.addView(saves, underSettings);
-        if (installed) {   // mods need the game
-            LinearLayout.LayoutParams underSaves = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            underSaves.topMargin = dp(c, 12);
-            leftCards.addView(modsCard(c), underSaves);
-        }
-        ScrollView leftScroll = new ScrollView(c);   // the cards can be taller than a short screen
-        leftScroll.setFillViewport(true);
-        leftScroll.addView(leftCards);
+        if (!hasSaves)
+            card.addView(text(c, "No saves on this phone yet.", 14, MUTED), below(c, 12));
+    }
 
-        // what is imported (once the game is), then the hint and the import button, at the right
-        LinearLayout files = card(c);
-        files.addView(heading(c, "Game files"));
-        if (installed) {
-            TextView title = text(c, "Imported", 12, MUTED);
-            title.setAllCaps(true);
-            title.setLetterSpacing(0.1f);
-            files.addView(title, below(c, 8));
-            List<String> imported = imported();
-            for (int i = 0; i < imported.size(); i++) {
-                TextView item = text(c, "✓  " + imported.get(i), 16, TEXT);
-                if (i > 0)   // the DLCs, after the game
-                    item.setTypeface(null, Typeface.ITALIC);
-                files.addView(item, below(c, 4));
+    /** Display: the resolution and frame rate, each kept as soon as it is picked. */
+    private void displayPage(Context c, LinearLayout card) {
+        SharedPreferences prefs = getPreferences(MODE_PRIVATE);
+        Spinner heights = dropdown(c, DDActivity::resolution, HEIGHTS, prefs.getInt("height", DEFAULT_HEIGHT));
+        heights.setOnItemSelectedListener(keep(prefs, "height", HEIGHTS));
+        Spinner rates = dropdown(c, f -> f + " FPS", FPS, prefs.getInt("fps", FPS[0]));
+        rates.setOnItemSelectedListener(keep(prefs, "fps", FPS));
+        card.addView(text(c, "Resolution (lower saves battery)", 14, MUTED));
+        card.addView(heights, below(c, 4));
+        card.addView(text(c, "Frame rate (lower saves battery)", 14, MUTED), below(c, 16));
+        card.addView(rates, below(c, 4));
+    }
+
+    /** Keeps a dropdown's pick among `values` in the preferences under `key`. */
+    private static AdapterView.OnItemSelectedListener keep(SharedPreferences prefs, String key, int[] values) {
+        return new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                prefs.edit().putInt(key, values[position]).apply();
             }
-            files.addView(text(c, "Pick one or more of GOG's DLC installers.", 14, MUTED), below(c, 16));
-        } else {
-            files.addView(text(c, "Pick one of these:", 14, MUTED), below(c, 8));
-            files.addView(source(c, "GOG's Linux installer", "darkest_dungeon_…_linux_….sh"), below(c, 4));
-            files.addView(source(c, "The Steam zip", "darkest-dungeon-steam.zip"), below(c, 4));
-            files.addView(text(c, "For GOG, DLC installers can be picked together with the game. "
-                    + "The Steam zip already has your DLCs.", 14, MUTED), below(c, 8));
-        }
-        Button pick = button(c, installed ? "Add DLC" : "Import game", BUTTON, TEXT);
-        pick.setOnClickListener(b -> pickFiles());
-        LinearLayout.LayoutParams atRight = below(c, 12);
-        atRight.gravity = Gravity.END;
-        files.addView(pick, atRight);
-        ScrollView filesScroll = new ScrollView(c);   // the hint and many DLCs can be taller than the card
-        filesScroll.setBackground(rounded(c));
-        filesScroll.setClipToOutline(true);
-        filesScroll.addView(files);
 
-        LinearLayout cards = new LinearLayout(c);
-        LinearLayout.LayoutParams left = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 2);
-        left.rightMargin = dp(c, 12);
-        cards.addView(leftScroll, left);
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3);
-        right.leftMargin = dp(c, 12);
-        cards.addView(filesScroll, right);
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        };
+    }
 
-        Button play = button(c, "Play", ACCENT, ON_ACCENT);
-        play.setTextSize(18);
-        play.setMinWidth(dp(c, 240));
-        play.setOnClickListener(b -> {
-            int height = HEIGHTS[heights.getSelectedItemPosition()], fps = FPS[rates.getSelectedItemPosition()];
-            prefs.edit().putInt("height", height).putInt("fps", fps).apply();
-            start(height, fps);
-        });
-        play.setEnabled(installed);
-        if (!installed) {
-            play.setBackgroundTintList(ColorStateList.valueOf(BUTTON));
-            play.setTextColor(MUTED);
-        }
-        FrameLayout bottom = new FrameLayout(c);   // Play in the middle, the app's version at the left
-        bottom.addView(play, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
-        bottom.addView(text(c, "v" + versionName(), 12, MUTED), new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
-                Gravity.START | Gravity.BOTTOM));
-
-        LinearLayout layout = new LinearLayout(c);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setBackgroundColor(BACKGROUND);
-        layout.setPadding(dp(c, 24), dp(c, 16), dp(c, 24), dp(c, 12));
-        layout.addView(cards, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(c, 12);
-        layout.addView(bottom, lp);
-        setContentView(layout);
-        if (dialogMessage != null)   // what the last import has to say
-            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                    .setTitle(dialogTitle)
-                    .setMessage(dialogMessage)
-                    .setPositiveButton(android.R.string.ok, null)
-                    .show();
+    private static String resolution(int height) {
+        return height * 16 / 9 + " × " + height + (height == 2160 ? " (4K)" : "");
     }
 
     /** The APK's versionName, as build.gradle sets it. */
@@ -360,8 +580,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         List<String> names = new ArrayList<>();
         if (!gameBinary().exists())
             return names;
-        boolean gog = new File(gameDir(), "goggame-1450711444.info").exists();
-        names.add(gog ? "Darkest Dungeon (GOG)" : "Darkest Dungeon (Steam)");
+        names.add(gogGame() ? "Darkest Dungeon (GOG)" : "Darkest Dungeon (Steam)");
         String[] dlcs = new File(gameDir(), "dlc").list();
         if (dlcs != null) {
             Arrays.sort(dlcs);
@@ -369,6 +588,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 names.add(dlcName(dlc));
         }
         return names;
+    }
+
+    /** Whether the imported game is GOG's (else Steam's). */
+    private boolean gogGame() {
+        return new File(gameDir(), "goggame-1450711444.info").exists();
     }
 
     /** The name of the DLC in dlc/<id>_<key>; an unknown key is shown with its words capitalised. */
@@ -387,25 +611,6 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             if (!word.isEmpty())
                 s.append(s.length() > 0 ? " " : "").append(Character.toUpperCase(word.charAt(0))).append(word.substring(1));
         return s.toString();
-    }
-
-    /** The mods card: each installed mod by its title, then Add mods. */
-    private LinearLayout modsCard(Context c) {
-        LinearLayout card = card(c);
-        card.setBackground(rounded(c));
-        card.addView(heading(c, "Mods"));
-        List<Mod> mods = installedMods();
-        if (mods.isEmpty())
-            card.addView(text(c, "None yet. Add takes zip, 7z or RAR files with one or more mods in them.", 14, MUTED), below(c, 8));
-        for (Mod mod : mods)
-            card.addView(text(c, mod.title, 16, TEXT), below(c, 4));
-        Button add = button(c, "Add mods", BUTTON, TEXT);
-        add.setOnClickListener(b -> pickMods());
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.topMargin = dp(c, 12);
-        card.addView(add, lp);
-        return card;
     }
 
     /** A dropdown of the values' labels; `selected` (else the first) is shown. */
@@ -1019,8 +1224,14 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     // repeats Backspace, Delete and the arrows itself and ignores other repeats.
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (gameW == 0)
+        if (gameW == 0) {
+            ViewGroup content = findViewById(android.R.id.content);
+            if (keyCode == KeyEvent.KEYCODE_BACK && page != Page.HUB && content.getChildAt(0) == launchScreen) {
+                openPage(Page.HUB);   // a page of the launch screen: Back goes to the hub
+                return true;
+            }
             return super.onKeyDown(keyCode, event);
+        }
         if (padKey(keyCode, event, true))
             return true;
         if (keyCode == KeyEvent.KEYCODE_BACK) {

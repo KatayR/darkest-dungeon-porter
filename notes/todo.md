@@ -1320,6 +1320,7 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 **Plan:**
 - [x] `unpackGame`: a `ZipException` while unpacking becomes `DAMAGED`, as in `unpackSaves`. `GameZip` has taken the file by then, so it can only be damaged data.
 - [x] Verify: the debug APK builds. On the PC, Windows tar's zip of the cyst PNG at the `.bat`'s settings reads back cleanly; 3,000 single-bit flips in its data each give a `ZipException` (123 of them "invalid entry size", most others a CRC error), so each now shows `DAMAGED`. Not tried on a phone.
+
 ## Mods (2026-10-29)
 
 **Asked:** players want mods. Is it doable, and how?
@@ -1418,3 +1419,20 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 - [x] The subscriptions path, on a copy pointed at a test library (an acf with 5 items of this account and 1 of another, and an appmanifest): it found the 5, offered them, and N went on to links.
 - A research agent found no easier way: the subscriptions page and `EnumerateUserSubscribedFiles` need a login or a publisher key; DepotDownloader `-pubfile` and SteamCMD need the account's password in a separate tool; web downloaders are dead or unreliable for paid games. The README points to the logged-in subscriptions page for copying links.
 - [ ] Release: attach `get-steam-mods.bat` with `get-steam-game.bat` and `get-saves.bat`.
+
+## Launch screen: hub (2026-10-29)
+**Asked:** tidy the launch screen. The left column scrolled (Settings cut at the top, Mods at the bottom) while Game files was half empty. Four layouts were drawn (canvas "Launch screen alternatives"); the owner picked **B, the hub**.
+
+**Plan:**
+- [x] Hub: at the left, one card of rows, each a title, a one-line summary and a chevron, with an icon (vector drawables): Game files ("GOG · The Musketeer, The Color of Madness" / "Not imported yet"), Mods ("8 installed" / "None yet"; only once the game is imported), Save file ("Import or export" / "No saves yet"), Display ("1920 × 1080 · 60 FPS"). At the right: "Darkest Dungeon", a summary ("GOG · 2 DLC · 8 mods", or "Import the game to play."), a large Play, the version at the bottom right.
+- [x] A row opens its page: a back button, the title, the page's action at the right (Add DLC / Import game, Add mods), the content in a card below:
+  - Game files: today's card content (the ✓ list and the DLC hint, or the import sources).
+  - Mods: the titles in two columns; "None yet. …" when empty.
+  - Save file: Import and Export (Export off without saves).
+  - Display: today's two dropdowns and labels; a change is saved at once (Play is on the hub now).
+- [x] Back (key or gesture) on a page returns to the hub. After an import or export, the page it started from opens again with the message.
+- [x] On the A34: the hub (10 mods: "GOG · 2 DLC · 10 mods"), each page, Back from each to the hub (key event). A page's card is as tall as its content (it first filled the screen, which left Display and Save file mostly empty). 1600 × 900 picked on Display showed on the hub at once; set back to 1920 × 1080.
+- [ ] Not tried yet: Play after a Display change, Add mods from the Mods page (it should come back to the Mods page with the message), the state before the game is imported (Game files → Import game; no Mods row; Play off).
+- README: the steps name the rows (Game files → Import game / Add DLC, Display, Save file, Mods).
+- [x] Asked: a "?" on the Mods page, on how mods get to the phone. A round "?" between the title and Add mods opens "Getting mods": what Add mods takes, the Steam Workshop route with `get-steam-mods.bat` (links, or the subscriptions with the game installed; the game isn't needed on the PC), Nexus and other sites (password-protected or split archives need repacking on a PC), and that adding a mod again updates it. Buttons: Releases page (opens the GitHub Releases page), Close, Add mods. Checked on the A34: it opens, the text scrolls.
+- [ ] Release 0.5.3 (versionCode 16): mods (zip/7z/RAR, Nexus mods, `get-steam-mods.bat`), the hub, and the damaged-zip message from 0.5.2's branch. Attach `get-steam-mods.bat` with `get-steam-game.bat` and `get-saves.bat`.
