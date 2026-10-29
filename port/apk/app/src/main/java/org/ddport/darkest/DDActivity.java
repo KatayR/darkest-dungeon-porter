@@ -1789,6 +1789,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                         progress.accept(shown = percent);
                 }
                 done += z.zipBytes;
+            } catch (ZipException e) {   // GameZip took it as the game's, so its data is damaged
+                throw new IOException(DAMAGED, e);
             }
         }
         if (installed) {
