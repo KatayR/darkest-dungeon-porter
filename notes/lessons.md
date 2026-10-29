@@ -19,6 +19,7 @@ Project rules learned from mistakes made during the port.
 - Edit files in an app's external storage through the FUSE path (`/storage/emulated/0/...`), never underneath it in `/data/media`. Changes made below FUSE left the app seeing the old file sizes, so the game read truncated shaders and failed with no useful error.
 - `cmd f | ... > f` empties `f` before `cmd` reads it, because the shell opens the redirect first. Make any backup of `f` in a separate step before the pipeline. This wiped four shaders once; the chroot copy restored them.
 - Toybox `grep` on the phone doesn't support `\|` alternation in basic regex and fails silently. Use `grep -E 'a|b'`.
+- List a folder on the phone, in full and on its own, before copying test data into it, even right after a wipe. Test saves were copied into the app's saves folder on the belief that it was empty (it had been wiped half an hour earlier), but the owner had imported saves since; the listing that would have shown it was in the same command as the copy and cut to 3 lines. Same-named files were overwritten.
 - Android's Downloads picker reads the media index: files pushed with adb stay invisible there until scanned (`am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://<path>`). Scan after every push of test files.
 
 ## Debugging a closed-source binary

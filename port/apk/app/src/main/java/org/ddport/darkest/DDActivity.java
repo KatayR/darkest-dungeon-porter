@@ -81,6 +81,9 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -537,7 +540,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         }
     }
 
-    /** Save file: Import and Export side by side (Export only once there are saves). */
+    /** Save file: Import and Export side by side (Export only once there are saves), then the campaigns. */
     private void saveFilePage(Context c, LinearLayout card) {
         LinearLayout buttons = new LinearLayout(c);
         Button importSaves = button(c, "Import", BUTTON, TEXT);
@@ -558,6 +561,77 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 LinearLayout.LayoutParams.WRAP_CONTENT));
         if (!hasSaves)
             card.addView(text(c, "No saves on this phone yet.", 14, MUTED), below(c, 12));
+        else
+            campaigns(c, card);
+    }
+
+    /**
+     * Each campaign in the saves, a line each: its hamlet's name, then its week, play time and when it
+     * was last saved (from profile_<n>/persist.game.json and persist.campaign_log.json, see SaveFile). A
+     * profile without a hamlet (the Butcher's Circus) or that can't be read is left out.
+     */
+    private void campaigns(Context c, LinearLayout card) {
+        File[] profiles = savesDir().listFiles(f -> f.getName().matches("profile_\\d+"));
+        if (profiles == null)
+            return;
+        Arrays.sort(profiles, Comparator.comparingInt(f -> Integer.parseInt(f.getName().substring(8))));
+        LinearLayout list = new LinearLayout(c);
+        list.setOrientation(LinearLayout.VERTICAL);
+        for (File profile : profiles) {
+            File gameFile = new File(profile, "persist.game.json"), logFile = new File(profile, "persist.campaign_log.json");
+            if (!gameFile.isFile())
+                continue;
+            String name;
+            List<String> facts = new ArrayList<>();
+            try {
+                SaveFile game = new SaveFile(gameFile);
+                name = game.string("base_root.estatename");
+                if (name == null || name.isEmpty())
+                    continue;
+                int week = logFile.isFile() ? new SaveFile(logFile).integer("base_root.total_weeks", -1) : -1;
+                if (week >= 0)
+                    facts.add("Week " + week);
+                float seconds = game.decimal("base_root.totalelapsed", -1);
+                if (seconds >= 0)
+                    facts.add(seconds >= 3600 ? (int) (seconds / 3600) + " h played" : (int) (seconds / 60) + " min played");
+                String saved = game.string("base_root.date_time");
+                if (saved != null)
+                    facts.add("Last saved " + savedAt(saved));
+            } catch (IOException e) {
+                Log.w(TAG, "unreadable save in " + profile, e);
+                continue;
+            }
+            if (list.getChildCount() > 0)
+                list.addView(divider(c));
+            LinearLayout row = new LinearLayout(c);
+            row.setPadding(0, dp(c, 10), 0, dp(c, 10));
+            TextView title = text(c, name, 16, TEXT);
+            title.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+            row.addView(title, wrap());
+            TextView details = text(c, String.join(" · ", facts), 14, MUTED);
+            details.setSingleLine();
+            details.setEllipsize(TextUtils.TruncateAt.END);
+            LinearLayout.LayoutParams rest = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+            rest.leftMargin = dp(c, 16);
+            row.addView(details, rest);
+            list.addView(row, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT));
+        }
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(c, 8);
+        if (list.getChildCount() > 0)
+            card.addView(list, lp);
+    }
+
+    /** A save's date_time ("2026-10-23 20:40:49") as "23 Oct 2026, 20:40"; as it is if it doesn't parse. */
+    private static String savedAt(String dateTime) {
+        try {
+            return LocalDateTime.parse(dateTime, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.US))
+                    .format(DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm", Locale.US));
+        } catch (DateTimeParseException e) {
+            return dateTime;
+        }
     }
 
     /** Display: the resolution and frame rate, each kept as soon as it is picked. */

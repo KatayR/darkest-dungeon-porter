@@ -48,7 +48,7 @@ Other devices may work. Reports are welcome.
 4. Under **Display**, choose a resolution (4K, 1440p, 1080p, 900p, 720p or 540p) and a frame rate (60/30/20/15), then go back and tap **Play**. Lower settings save battery; resolutions above the screen's own are scaled down, so they look slightly sharper but cost much more GPU time.
 
 ## Saves
-Saves are kept in the app's private storage, so uninstalling the app deletes them. **Save file** on the launch screen copies them out and back in:
+Saves are kept in the app's private storage, so uninstalling the app deletes them. **Save file** on the launch screen lists each campaign (hamlet name, week, play time, last save) and copies them out and back in:
 - **Export** writes them to a zip, wherever you pick (e.g. `Download/`). Keep it before uninstalling the app, or use it to move your saves to another phone.
 - **Import** replaces the saves on the phone with the ones in a zip.
   - The save folder (the one holding `profile_0`, `profile_1`, …) can be anywhere inside the zip.
