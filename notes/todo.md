@@ -1452,5 +1452,5 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 - [x] Mods go to `mods/<title>/` with no `.` in the name (`folderName`); folders installed earlier as `<title>.json` (or with any `.`) are renamed at launch.
 - [x] On the A34 (debug build; the owner had wiped the saves and mods first): `mod loader patched at 0x83a3d3` logged once, then the stamp skips it. Vermintide put in an old-style `mods/Vermintide Mod.json/` was renamed to `mods/Vermintide Mod/` at Play. A new campaign with it on went past the assert into the tutorial (green torch: the mod's), and its `persist.game.json` records `applied_ugcs_1_0` = `{Vermintide Mod, mod_local_source}`: the title came through the JSON reader with no `.json` in the path.
 - [x] The owner then added 9 more mods with Add mods (among them a zip of Faster Scouting, Stacking Inventory, Compact Circus Icon and Satyr Class Mod) and tested them all in the game: all worked.
-- [x] Released as 0.6.1 (versionCode 18).
+- [x] Released as 0.6.1 (versionCode 18, tag on `4712473`), signed with the upload key (`963301da…3196934`), with `get-steam-game.bat`, `get-saves.bat` and `get-steam-mods.bat`; the downloaded APK matches the signed one.
 - A `project.xml` still in XML (a mod copied in by hand) now meets the JSON reader too; mods only arrive through Add mods, which always writes JSON.
