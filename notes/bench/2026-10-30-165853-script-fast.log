@@ -1,0 +1,242 @@
+--------- beginning of main
+10-30 16:58:55.147   917   917 I DDActivity: Play: 1920x1080 at 60 FPS
+10-30 16:58:55.199   917   917 I DDActivity: before the game: assets 1 ms, mod folders 1 ms, mirror 3 ms
+10-30 16:58:55.206   917   917 I DDActivity: game process started
+10-30 16:58:55.216   917  1198 I ddview  : game connected
+10-30 16:58:55.226   917  1198 I ddview  : window 1920x1080
+10-30 16:58:55.353  1278  1278 I ddbench : glue loaded
+10-30 16:58:56.354  1278  1298 I ddbench : frames 0 (longest 0 ms), cpu 98% (darkest.bin.x86 98%), read 16.7 MB (0.0 MB from storage) in 596 calls, 0 major faults
+10-30 16:58:56.669  1278  1278 I ddbench : game calls SDL_Init
+10-30 16:58:56.673  1278  1278 I ddglue  : app surface 1920x1080, 1 refreshes per frame
+10-30 16:58:56.673  1278  1278 I ddglue  : game creates a 1920x1080 window (flags 0x101b), rendering at 1920x1080
+10-30 16:58:56.772  1278  1278 I ddglue  : 3 shared 1920x1080 buffers sent to the app
+10-30 16:58:56.772  1278  1278 I ddglue  : GLES 2 context 1920x1080 (depth 0 stencil 0), gl4es initialised
+10-30 16:58:56.774   917  1198 I ddview  : buffer 0: 1920x1080 image 0xb400006f2a339610
+10-30 16:58:56.775   917  1198 I ddview  : buffer 1: 1920x1080 image 0xb400006f2a33a210
+10-30 16:58:56.777   917  1198 I ddview  : buffer 2: 1920x1080 image 0xb400006f2a33be90
+10-30 16:58:56.925  1278  1278 I ddglue  : trinket inventory: TownDisplay::s_Instance at 0x3841090, the panel at +0x2f70, its state at +0x38
+10-30 16:58:56.925  1278  1278 I ddglue  : provisions: TownDisplay::s_Instance at 0x3841090, the panel at +0x2888, its state at +0x38
+10-30 16:58:56.925  1278  1278 I ddglue  : dungeon: Raid::s_Instance at 0x37ba370, the battle at +0x4778, its state at +0x248; LoadingScreen::s_Instance at 0x38b22a8, its flag at +0x2cc
+10-30 16:58:56.925  1278  1278 I ddglue  : Escape menu: the screens' s_Instance at 0x3841090 0x387ab60 0x3889628 0x36105b8 0x3845b70 0x3842b80, the menu at +0x708, its state at +0x38, its page at +0x60
+10-30 16:58:56.930  1278  1278 I ddbench : first frame
+10-30 16:58:57.357  1278  1298 I ddbench : frames 1 (longest 0 ms), cpu 94% (darkest.bin.x86 71%, darkest.bin.x86 10%, darkest.bin.x86 4%), read 0.4 MB (0.0 MB from storage) in 160 calls, 0 major faults
+10-30 16:58:58.360  1278  1298 I ddbench : frames 0 (longest 0 ms), cpu 125% (darkest.bin.x86 53%, darkest.bin.x86 16%, mali-compiler 14%), read 23.5 MB (0.0 MB from storage) in 906 calls, 0 major faults
+10-30 16:58:58.883  1278  1278 I ddbench : stall: a frame took 1953 ms
+10-30 16:58:58.883  1278  1278 I ddglue  : fps 1.0
+10-30 16:58:58.889   917  1198 I ddview  : fps 1, waited 0.0 ms
+10-30 16:58:59.362  1278  1298 I ddbench : frames 1 (longest 1953 ms), cpu 207% (darkest.bin.x86 99%, darkest.bin.x86 57%, darkest.bin.x86 27%), read 113.7 MB (0.0 MB from storage) in 1482 calls, 0 major faults
+10-30 16:59:00.364  1278  1298 I ddbench : frames 0 (longest 0 ms), cpu 207% (darkest.bin.x86 100%, darkest.bin.x86 99%, darkest.bin.x86 3%), read 2.3 MB (0.0 MB from storage) in 114 calls, 0 major faults
+10-30 16:59:00.588  1278  1278 I ddbench : screen: front end SPLASH0
+10-30 16:59:00.588  1278  1278 I ddbench : stall: a frame took 1705 ms
+10-30 16:59:00.588  1278  1278 I ddglue  : fps 0.6
+10-30 16:59:00.595   917  1198 I ddview  : fps 1, waited 0.0 ms
+10-30 16:59:00.716   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:00.719   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:00.730  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:01.004   917  1198 I ddview  : fps 23, waited 11.5 ms
+10-30 16:59:01.116   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:01.118   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:01.122  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:01.365  1278  1298 I ddbench : frames 46 (longest 1705 ms), cpu 73% (darkest.bin.x86 36%, darkest.bin.x86 22%, mali-cmar-backe 7%), read 2.2 MB (0.0 MB from storage) in 1981 calls, 0 major faults
+10-30 16:59:01.519   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:01.520   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:01.524  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:01.590  1278  1278 I ddglue  : fps 58.9
+10-30 16:59:01.926   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:01.928   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:01.938  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:02.004   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:02.332   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:02.334   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:02.338  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:02.366  1278  1298 I ddbench : frames 60 (longest 18 ms), cpu 21% (darkest.bin.x86 11%, mali-cmar-backe 6%, libddhost.so 1%), read 0.1 MB (0.0 MB from storage) in 2085 calls, 0 major faults
+10-30 16:59:02.605  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:02.736   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:02.737   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:02.755  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:03.005   917  1198 I ddview  : fps 60, waited 12.6 ms
+10-30 16:59:03.131   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:03.132   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:03.137  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:03.368  1278  1298 I ddbench : frames 60 (longest 20 ms), cpu 21% (darkest.bin.x86 10%, mali-cmar-backe 6%, AudioTrack 2%), read 0.1 MB (0.0 MB from storage) in 2111 calls, 0 major faults
+10-30 16:59:03.522   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:03.523   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:03.539  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:03.622  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:03.925   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:03.926   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:03.939  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:04.004   917  1198 I ddview  : fps 60, waited 12.7 ms
+10-30 16:59:04.330   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:04.333   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:04.338  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:04.369  1278  1298 I ddbench : frames 60 (longest 20 ms), cpu 21% (darkest.bin.x86 10%, mali-cmar-backe 7%, AudioTrack 2%), read 0.1 MB (0.0 MB from storage) in 2144 calls, 0 major faults
+10-30 16:59:04.638  1278  1278 I ddglue  : fps 60.1
+10-30 16:59:04.743   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:04.744   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:04.753  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:05.004   917  1198 I ddview  : fps 60, waited 12.6 ms
+10-30 16:59:05.142   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:05.144   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:05.154  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:05.370  1278  1298 I ddbench : frames 60 (longest 20 ms), cpu 23% (darkest.bin.x86 11%, mali-cmar-backe 7%, AudioTrack 2%), read 0.1 MB (0.0 MB from storage) in 2124 calls, 0 major faults
+10-30 16:59:05.553   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:05.555   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:05.557  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:05.639  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:05.963   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:05.966   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:05.971  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:06.004   917  1198 I ddview  : fps 60, waited 12.6 ms
+10-30 16:59:06.368   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:06.369   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:06.371  1278  1298 I ddbench : frames 60 (longest 20 ms), cpu 21% (darkest.bin.x86 11%, mali-cmar-backe 6%, darkest.bin.x86 2%), read 0.1 MB (0.0 MB from storage) in 2118 calls, 0 major faults
+10-30 16:59:06.372  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:06.654  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:06.781   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:06.783   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:06.788  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:07.004   917  1198 I ddview  : fps 60, waited 12.7 ms
+10-30 16:59:07.196   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:07.198   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:07.204  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:07.373  1278  1298 I ddbench : frames 61 (longest 20 ms), cpu 23% (darkest.bin.x86 9%, mali-cmar-backe 7%, AudioTrack 2%), read 0.1 MB (0.0 MB from storage) in 2126 calls, 0 major faults
+10-30 16:59:07.600   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:07.602   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:07.604  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:07.655  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:07.866  1278  1278 I ddbench : screen: front end HOR_TRAILER
+10-30 16:59:07.994   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:07.995   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:08.002   917  1198 I ddview  : fps 60, waited 12.7 ms
+10-30 16:59:08.002  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:08.374  1278  1298 I ddbench : frames 60 (longest 18 ms), cpu 51% (darkest.bin.x86 27%, darkest.bin.x86 12%, mali-cmar-backe 6%), read 0.1 MB (0.0 MB from storage) in 2000 calls, 0 major faults
+10-30 16:59:08.513   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:08.517   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:08.522  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:08.670  1278  1278 I ddglue  : fps 60.1
+10-30 16:59:08.930   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:08.932   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:08.937  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:09.003   917  1198 I ddview  : fps 60, waited 13.6 ms
+10-30 16:59:09.329   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:09.330   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:09.337  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:09.375  1278  1298 I ddbench : frames 60 (longest 29 ms), cpu 34% (darkest.bin.x86 13%, mali-cmar-backe 6%, darkest.bin.x86 6%), read 1.0 MB (0.0 MB from storage) in 2018 calls, 0 major faults
+10-30 16:59:09.671  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:09.732   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:09.734   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:09.737  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:10.003   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:10.026  1278  1278 I ddbench : screen: front end PREAMBLE
+10-30 16:59:10.136   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:10.140   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:10.377  1278  1298 I ddbench : frames 40 (longest 23 ms), cpu 22% (darkest.bin.x86 9%, mali-cmar-backe 5%, darkest.bin.x86 3%), read 0.1 MB (0.0 MB from storage) in 1372 calls, 0 major faults
+10-30 16:59:10.553   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:10.555   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:10.968   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:10.971   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:11.376   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:11.377  1278  1298 I ddbench : frames 0 (longest 0 ms), cpu 8% (darkest.bin.x86 3%, AudioTrack 2%, darkest.bin.x86 1%), read 0.1 MB (0.0 MB from storage) in 38 calls, 0 major faults
+10-30 16:59:11.379   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:11.770   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:11.771   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:11.797  1278  1278 I ddbench : stall: a frame took 1757 ms
+10-30 16:59:11.797  1278  1278 I ddglue  : fps 10.8
+10-30 16:59:11.797  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:11.798   917  1198 I ddview  : fps 4, waited 7.9 ms
+10-30 16:59:11.869  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:11.937  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:12.002   917  1198 I ddview  : fps 13, waited 12.5 ms
+10-30 16:59:12.003  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:12.070  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:12.171   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:12.173   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:12.185  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:12.378  1278  1298 I ddbench : frames 37 (longest 1757 ms), cpu 24% (darkest.bin.x86 11%, mali-cmar-backe 4%, darkest.bin.x86 3%), read 0.1 MB (0.0 MB from storage) in 1349 calls, 0 major faults
+10-30 16:59:12.575   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:12.577   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:12.586  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:12.804  1278  1278 I ddglue  : fps 61.6
+10-30 16:59:12.979   917   917 I DDActivity: touch ACTION_DOWN at 1170,540, 1 finger(s)
+10-30 16:59:12.981   917   917 I DDActivity: touch ACTION_UP at 1170,540, 1 finger(s)
+10-30 16:59:12.986  1278  1278 I ddbench : press: mouse button 1 at 991,540
+10-30 16:59:13.002   917  1198 I ddview  : fps 60, waited 12.7 ms
+10-30 16:59:13.191  1278  1278 I ddbench : screen: front end START
+10-30 16:59:13.334   917   917 I DDActivity: touch ACTION_DOWN at 1131,943, 1 finger(s)
+10-30 16:59:13.336   917   917 I DDActivity: touch ACTION_UP at 1131,943, 1 finger(s)
+10-30 16:59:13.337  1278  1278 I ddbench : press: mouse button 1 at 958,943
+10-30 16:59:13.380  1278  1298 I ddbench : frames 60 (longest 22 ms), cpu 35% (darkest.bin.x86 15%, mali-cmar-backe 6%, darkest.bin.x86 6%), read 0.2 MB (0.0 MB from storage) in 2139 calls, 0 major faults
+10-30 16:59:13.736   917   917 I DDActivity: touch ACTION_DOWN at 1131,943, 1 finger(s)
+10-30 16:59:13.739   917   917 I DDActivity: touch ACTION_UP at 1131,943, 1 finger(s)
+10-30 16:59:13.753  1278  1278 I ddbench : press: mouse button 1 at 958,943
+10-30 16:59:13.804  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:14.002   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:14.144   917   917 I DDActivity: touch ACTION_DOWN at 1131,943, 1 finger(s)
+10-30 16:59:14.145   917   917 I DDActivity: touch ACTION_UP at 1131,943, 1 finger(s)
+10-30 16:59:14.153  1278  1278 I ddbench : press: mouse button 1 at 958,943
+10-30 16:59:14.381  1278  1298 I ddbench : frames 60 (longest 18 ms), cpu 31% (darkest.bin.x86 12%, mali-cmar-backe 7%, darkest.bin.x86 6%), read 0.2 MB (0.0 MB from storage) in 2144 calls, 0 major faults
+10-30 16:59:14.540   917   917 I DDActivity: touch ACTION_DOWN at 1131,943, 1 finger(s)
+10-30 16:59:14.542   917   917 I DDActivity: touch ACTION_UP at 1131,943, 1 finger(s)
+10-30 16:59:14.551  1278  1278 I ddbench : press: mouse button 1 at 958,943
+10-30 16:59:14.664  1278  1278 I ddbench : screen: front end SAVES
+10-30 16:59:14.793   917   917 I DDActivity: touch ACTION_DOWN at 858,641, 1 finger(s)
+10-30 16:59:14.795   917   917 I DDActivity: touch ACTION_UP at 858,641, 1 finger(s)
+10-30 16:59:14.803  1278  1278 I ddbench : press: mouse button 1 at 727,641
+10-30 16:59:14.820  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:15.004   917  1198 I ddview  : fps 60, waited 12.6 ms
+10-30 16:59:15.196   917   917 I DDActivity: touch ACTION_DOWN at 858,641, 1 finger(s)
+10-30 16:59:15.197   917   917 I DDActivity: touch ACTION_UP at 858,641, 1 finger(s)
+10-30 16:59:15.202  1278  1278 I ddbench : press: mouse button 1 at 727,641
+10-30 16:59:15.382  1278  1298 I ddbench : frames 60 (longest 29 ms), cpu 47% (darkest.bin.x86 25%, darkest.bin.x86 7%, mali-cmar-backe 6%), read 0.2 MB (0.0 MB from storage) in 2099 calls, 0 major faults
+10-30 16:59:15.625   917   917 I DDActivity: touch ACTION_DOWN at 858,641, 1 finger(s)
+10-30 16:59:15.627   917   917 I DDActivity: touch ACTION_UP at 858,641, 1 finger(s)
+10-30 16:59:15.635  1278  1278 I ddbench : press: mouse button 1 at 727,641
+10-30 16:59:15.747  1278  1278 I ddbench : screen: front end INSANITY
+10-30 16:59:15.819  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:16.002   917  1198 I ddview  : fps 60, waited 12.6 ms
+10-30 16:59:16.383  1278  1298 I ddbench : frames 60 (longest 28 ms), cpu 41% (darkest.bin.x86 17%, darkest.bin.x86 10%, mali-cmar-backe 6%), read 2.8 MB (0.0 MB from storage) in 2164 calls, 0 major faults
+10-30 16:59:16.746  1278  1278 I ddbench : screen: none
+10-30 16:59:17.259  1278  1278 I ddbench : screen: loading
+10-30 16:59:17.260  1278  1278 I ddbench : stall: a frame took 504 ms
+10-30 16:59:17.260  1278  1278 I ddglue  : fps 39.6
+10-30 16:59:17.262   917  1198 I ddview  : fps 47, waited 12.4 ms
+10-30 16:59:17.386  1278  1298 I ddbench : frames 32 (longest 504 ms), cpu 128% (darkest.bin.x86 54%, darkest.bin.x86 35%, darkest.bin.x86 9%), read 7.6 MB (0.0 MB from storage) in 1281 calls, 0 major faults
+10-30 16:59:18.011   917  1198 I ddview  : fps 45, waited 12.6 ms
+10-30 16:59:18.261  1278  1278 I ddglue  : fps 60.9
+10-30 16:59:18.388  1278  1298 I ddbench : frames 60 (longest 19 ms), cpu 234% (darkest.bin.x86 99%, darkest.bin.x86 67%, darkest.bin.x86 19%), read 5.1 MB (0.0 MB from storage) in 2763 calls, 0 major faults
+10-30 16:59:19.010   917  1198 I ddview  : fps 60, waited 13.1 ms
+10-30 16:59:19.277  1278  1278 I ddglue  : fps 60.1
+10-30 16:59:19.390  1278  1298 I ddbench : frames 60 (longest 21 ms), cpu 264% (darkest.bin.x86 98%, darkest.bin.x86 78%, darkest.bin.x86 36%), read 12.0 MB (0.0 MB from storage) in 3619 calls, 0 major faults
+10-30 16:59:20.009   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:20.278  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:20.392  1278  1298 I ddbench : frames 60 (longest 19 ms), cpu 239% (darkest.bin.x86 91%, darkest.bin.x86 64%, darkest.bin.x86 29%), read 9.6 MB (0.0 MB from storage) in 2705 calls, 0 major faults
+10-30 16:59:21.010   917  1198 I ddview  : fps 60, waited 13.0 ms
+10-30 16:59:21.294  1278  1278 I ddglue  : fps 60.1
+10-30 16:59:21.395  1278  1298 I ddbench : frames 60 (longest 19 ms), cpu 261% (darkest.bin.x86 99%, darkest.bin.x86 99%, darkest.bin.x86 26%), read 5.0 MB (0.0 MB from storage) in 2469 calls, 0 major faults
+10-30 16:59:22.010   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:22.294  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:22.397  1278  1298 I ddbench : frames 61 (longest 19 ms), cpu 267% (darkest.bin.x86 100%, darkest.bin.x86 100%, darkest.bin.x86 32%), read 10.0 MB (0.0 MB from storage) in 2592 calls, 0 major faults
+10-30 16:59:23.010   917  1198 I ddview  : fps 60, waited 12.9 ms
+10-30 16:59:23.310  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:23.400  1278  1298 I ddbench : frames 60 (longest 20 ms), cpu 268% (darkest.bin.x86 100%, darkest.bin.x86 99%, darkest.bin.x86 28%), read 7.8 MB (0.0 MB from storage) in 2800 calls, 0 major faults
+10-30 16:59:24.009   917  1198 I ddview  : fps 59, waited 13.1 ms
+10-30 16:59:24.318  1278  1278 I ddglue  : fps 58.6
+10-30 16:59:24.403  1278  1298 I ddbench : frames 58 (longest 27 ms), cpu 268% (darkest.bin.x86 100%, darkest.bin.x86 100%, darkest.bin.x86 30%), read 9.2 MB (0.0 MB from storage) in 2907 calls, 0 major faults
+10-30 16:59:25.000   917  1198 I ddview  : fps 59, waited 13.4 ms
+10-30 16:59:25.318  1278  1278 I ddglue  : fps 60.0
+10-30 16:59:25.405  1278  1298 I ddbench : frames 61 (longest 19 ms), cpu 300% (darkest.bin.x86 99%, darkest.bin.x86 98%, darkest.bin.x86 46%), read 16.1 MB (0.0 MB from storage) in 4782 calls, 0 major faults
+10-30 16:59:26.404  1278  1278 I ddbench : screen: hamlet
+10-30 16:59:26.406  1278  1278 I ddbench : stall: a frame took 805 ms
+10-30 16:59:26.406  1278  1278 I ddglue  : fps 16.5
+10-30 16:59:26.408  1278  1298 I ddbench : frames 12 (longest 19 ms), cpu 214% (darkest.bin.x86 93%, darkest.bin.x86 86%, darkest.bin.x86 9%), read 11.0 MB (0.0 MB from storage) in 738 calls, 0 major faults
+10-30 16:59:26.410   917  1198 I ddview  : fps 38, waited 13.0 ms
+10-30 16:59:27.010   917  1198 I ddview  : fps 32, waited 11.3 ms
+10-30 16:59:27.408  1278  1278 I ddglue  : fps 56.9
+10-30 16:59:27.410  1278  1298 I ddbench : frames 58 (longest 805 ms), cpu 89% (darkest.bin.x86 58%, mali-cmar-backe 10%, darkest.bin.x86 9%), read 0.5 MB (0.3 MB from storage) in 2978 calls, 0 major faults
+10-30 16:59:28.009   917  1198 I ddview  : fps 60, waited 12.1 ms
+10-30 16:59:28.409  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:28.412  1278  1298 I ddbench : frames 60 (longest 25 ms), cpu 89% (darkest.bin.x86 63%, darkest.bin.x86 11%, mali-cmar-backe 9%), read 0.2 MB (0.1 MB from storage) in 3059 calls, 0 major faults
+10-30 16:59:29.009   917  1198 I ddview  : fps 60, waited 12.3 ms
+10-30 16:59:29.410  1278  1278 I ddglue  : fps 59.9
+10-30 16:59:29.414  1278  1298 I ddbench : frames 60 (longest 21 ms), cpu 84% (darkest.bin.x86 58%, mali-cmar-backe 10%, darkest.bin.x86 8%), read 0.2 MB (0.0 MB from storage) in 3039 calls, 0 major faults

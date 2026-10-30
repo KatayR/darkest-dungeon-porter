@@ -1454,3 +1454,95 @@ Asked: touch controls as an alternative to the trackpad, selectable on the game'
 - [x] The owner then added 9 more mods with Add mods (among them a zip of Faster Scouting, Stacking Inventory, Compact Circus Icon and Satyr Class Mod) and tested them all in the game: all worked.
 - [x] Released as 0.6.1 (versionCode 18, tag on `4712473`), signed with the upload key (`963301da…3196934`), with `get-steam-game.bat`, `get-saves.bat` and `get-steam-mods.bat`; the downloaded APK matches the signed one.
 - A `project.xml` still in XML (a mod copied in by hand) now meets the JSON reader too; mods only arrive through Add mods, which always writes JSON.
+
+## Load time: benchmark logs (2026-10-30)
+**Asked:** launching the game, skipping the intro, Campaign, picking the save, its loading, and the click after it take too long. First add benchmark logs and record one run by hand as the reference point.
+
+**Plan:**
+- [x] `DDActivity`: log Play (resolution, FPS) and how long each step before the game process takes (assets, mod folders, mirror). Debuggable builds pass `DD_BENCH=1` to the game process.
+- [x] `ddglue` (tag `ddbench`, only with `DD_BENCH`): the glue loaded, the game's `SDL_Init`, the first frame, every press the game receives (mouse button with position, key, controller button), every frame that took over 100 ms (`stall`). A sampler thread logs once a second: frames, the process's CPU and its busiest threads by name, bytes read (all, and from disk) and read calls, major page faults.
+- [x] Build the debug APK, install, record a run by hand with `adb logcat`, and turn it into a timeline relative to Play: the reference for later changes.
+- The app also logs each finger down and up on the game screen (`touch ACTION_DOWN at x,y`), so a tap and the press the game gets can be told apart. In Touch controls the game gets the click when the finger lifts.
+
+**Baseline (A34, debug build of 0.6.1 + the logs, 1920×1080 at 60 FPS, Touch controls, Steam 28212 with 2 DLC and no mods, save "Darkestvjhvjh" (week 92) in the hamlet).** Three runs by the owner, the logs in `notes/bench/2026-10-30-baseline-{1,2,3}.log`; `python notes/bench/timeline.py <log> [--all]` prints the timeline and a row per span between presses.
+The flow: Play; the Red Hook logo (can't be skipped); a tap skips the Kickstarter screen; a tap skips the cinematic; a tap closes the game's info dialog; Campaign; the save, which loads into the hamlet (no tap after it; a save in a dungeon needs one more). Some taps were doubled (a misclick, or tapping again to skip).
+
+| Seconds since Play | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| Game calls `SDL_Init` (Box64 and the game's start before it) | 1.53 | 1.56 | 1.53 |
+| First frame | 1.78 | 1.82 | 1.77 |
+| Last start-up stall ends (frames of 1.9 s and 1.6 s), smooth 60 FPS from here | 5.33 | 5.46 | 5.32 |
+| First tap (skipping) | 11.19 | 11.24 | 11.08 |
+| Last tap before the title (the cinematic's skip) | 17.34 | 16.68 | 15.58 |
+| Title shows: a frame of 0.65–0.87 s ends | 18.89 | 18.47 | 17.35 |
+| Info dialog closed | 19.87 | 20.43 | 18.38 |
+| Campaign | 22.79 | 23.33 | 21.26 |
+| The save | 24.14 | 24.58 | 22.85 |
+| Hamlet: the load's last stall ends | 35.20 | 35.63 | 34.07 |
+| **The save → hamlet** | **11.06** | **11.05** | **11.22** |
+
+**What the runs show:**
+- The game's own waits repeat to ~0.2 s. The rest of the 34–36 s is the owner's taps.
+- **Save → hamlet, 11.1 s, held up by CPU:** ~1.4 s of normal frames, a 0.5 s frame, then ~8.5 s with two game threads at ~100% and a third at 20–35% (the loading screen keeps 60 FPS), then a 0.8 s frame. Reads are 5–15 MB/s. Run 1 read 58 MB from storage and run 3 0.5 MB (the rest from the page cache), with the same length, so storage isn't what it waits on. No major page faults.
+- **Start-up, 5.3 s before the intro runs smoothly:** 1.3 s from the glue's load to `SDL_Init` with one thread at 99% (Box64 loading the game, the game's start); then the first frame stays up 3.5 s while two threads are at 100% and ~140 MB is read (cached).
+- **Cinematic skip → title, ~1.8 s:** ~1 s of frames, then a 0.65–0.87 s frame.
+- Between the screens the game draws at 60 FPS. In the hamlet the process uses ~90% CPU (the main thread ~62%), with ~3,000 small reads a second.
+- Each tap reached the game 0–20 ms after the finger lifted.
+
+**The same flow driven by Claude over adb** (a screenshot, a look, `input tap`; `notes/bench/2026-10-30-claude-adb.log`): Play → hamlet 57.2 s against the owner's 34–36 s. The taps came 5.5–12.6 s apart, one screenshot round per screen. The game's own waits were the same as in the owner's runs (first frame 1.76 s, the start-up stalls 1.9 s and 1.6 s, the save → hamlet 10.8 s), so the logs measure the game whoever taps; only the total depends on the tapper.
+
+### Driving the flow by script (2026-10-30)
+**Asked:** Claude taps too slowly (screenshot, look, tap: 5–12 s a screen, 57 s against the owner's 35 s). Automate the flow: the game's state says which screen is up, a script taps known places at once. Screens that only show sometimes (the analytics dialog after a wipe: tap "Disable Data Collection") must be handled too.
+
+**What the game binary has** (Steam 28212, found by symbols, offsets to be taken from the code as for the Shift button):
+- `FrontEndDisplay::s_Instance`, its state at +0x1b38 (`IsPastStart`: `cmpl $6`). `FrontEndDisplay::ToString` reads the names from a table of 11 (`cmpl $0xb`; `movq 0x191b450(,%rax,8)`): SPLASH0, SPLASH0, APPLE_DEMO_SPLASH, HOR_TRAILER, PREAMBLE, START, STEAM_SAVE_CHECK, SAVES, INSANITY, INTRO_MOVIE, POST_INTRO_MOVIE.
+- Dialogs (the analytics one is made by `CreateBhvrAnalyticsRequestPopup`) go through `ConfirmDialog::System::s_Instance`: `GetIsEntriesInQueue` is `0x30(%rdi) != 0x10(%rdi)` (a deque's finish and start).
+- Already read by the glue: `VideoScreen::s_Instance`, `LoadingScreen` and its flag, `TownDisplay::s_Instance` (hamlet), `Raid::s_Instance` (dungeon).
+
+**Plan:**
+- [x] `ddglue`, with `DD_BENCH` only: at each swap, one `ddbench` line `screen: <...>` whenever the screen changes: the front end's state by name, video, a dialog (with its text, if its offset in the entry can be found; else just "dialog"), loading, hamlet, dungeon. Offsets and the name table taken from the instructions above, like `find_game_state`.
+- [x] `notes/bench/flow.py`: force-stops and starts the app, taps Play, follows logcat and taps on each screen at once: splash/intro movie/PREAMBLE → the screen's middle (again every 0.3 s until the screen changes); the analytics dialog → "Disable Data Collection"; START → Campaign; SAVES → the first save; loading → wait; hamlet → done; dungeon → one tap after its loading screen, then done. Any other screen or dialog, or no change within 30 s: a screenshot and stop. Saves the log to `notes/bench/` and prints the timeline.
+- Taps are screen positions on the A34 (2340×1080) and need the Touch controls (in Trackpad mode a tap clicks where the cursor is).
+- Tap positions on the A34's screen (2340×1080, landscape; from screenshots, Steam 28212 at 1920×1080):
+  | Screen | What | x, y |
+  |---|---|---|
+  | Launch screen | Play | 1681, 666 |
+  | Splashes, intro, info dialog (PREAMBLE) | anywhere: the middle | 1170, 540 |
+  | Analytics dialog (first start after a wipe) | Enable Data Collection | 1117, 584 |
+  | | **Disable Data Collection** (the one to tap) | 1117, 639 |
+  | Title (START) | Campaign | 1131, 943 |
+  | Save list (SAVES), first row | the save (its name) | 858, 641 |
+  | | delete save (red) | 1715, 638 |
+  | | DLC: enable / view (yellow; only when the game has DLC: without it the mods button may sit here, unchecked) | 1787, 635 |
+  | | mods: enable / view (blue; there once mods are installed) | 1849, 635 |
+  | Save list, second and third rows (empty: "Click the letter to begin") | the letter | 550, 772 and 550, 908 |
+- [x] Verify: three runs by script on the A34; the game's waits match the owner's baseline, and Play → hamlet is close to the sum of those waits.
+
+**As built:**
+- The glue logs e.g. `screen: front end START`, `screen: loading`, `screen: hamlet`; a dialog adds `, dialog "<text>": <answer> | <answer>` (the text and answers read as above, not yet seen on a real dialog). Offsets taken from Steam 28212's code; a build that differs logs "no front end / no dialogs in the screen lines".
+- `flow.py` sets the app's controls to Touch itself (writes `touch` into `shared_prefs/DDActivity.xml` with run-as while the app is stopped): after the wipe they were back on Trackpad, and every tap clicked the game's middle.
+- Front end states met: SPLASH0 → HOR_TRAILER → PREAMBLE → START → SAVES → INSANITY (the fade from the save list) → `none` → loading → hamlet. INTRO_MOVIE never showed.
+- The title and the save list ignore clicks for a while after they show: Campaign took effect 1.4 s after START, the save 0.9 s after SAVES (taps every 0.3 s; the earlier ones reach the game and do nothing). So the script taps a screen at once and again every 0.3 s.
+- After an install or a wipe, Android shows its own "Android App Compatibility" warning on the first launch of a debuggable app, over Play. `flow.py` finds it with `uiautomator dump` when a Play tap doesn't start the game, and taps "Don't Show Again" (the owner's choice). Checked on the A34 after a wipe: dismissed, then the launch screen.
+- **The warning also says the app's native libraries aren't 16 KB aligned.** Phones with 16 KB pages (some Android 15+ devices) may not load them. Not looked into yet.
+- Dialogs: the first dialogs came out as `dialog "": ` with answers of x86 code bytes, in the hamlet on Steam 28212 and on the DLC warning on GOG 27987. A queued entry holds its parameters 8 bytes in: `ShowEntry` reads the answers at +0x208 in both builds, `PushEntryInternal` builds them at +0x200 of the parameters. Read from +8 (`ENTRY_PARAMETERS`), the DLC warning logs `dialog "Required DLC is missing. Continue? (This will remove DLC content from your save, and is not reversib…": Continue (CAUTION!) | Cancel`. The glue reads a dialog only through `process_vm_readv` (an unmapped address gives "?" instead of a crash) and logs "(answers unreadable)" for a vector that isn't one.
+- GOG 27987 keeps the dialog queue in a vector (`GetIsEntriesInQueue`: `mov (%rdi),%rax; cmp 0x8(%rdi),%rax`, the shown entry its first), Steam 28212 in a deque; the glue takes either. The front end's code is the same in both.
+- `flow.py` taps a dialog's answer by its label: the analytics dialog "Disable Data Collection", the DLC warning (a save made with DLC that isn't imported) "Continue" (the owner's choice; it strips the DLC content from that save for good). Both dialogs put their answers at the same places, (1117, 584) and (1117, 639). Checked on the A34 with GOG 27987 without DLC or mods: the warning was answered, then loading, then the hamlet at 33.7 s (that save has no DLC content any more, so later runs won't see the warning).
+- In the save list without DLC or mods, only the delete button shows, where it was.
+- A dungeon save: its loading screen stays up ("Press [SPACE] or [CLICK] to Continue") with `LoadingScreen`'s active byte still set, so it read as `loading` throughout. `LoadingScreen::DoneLoading` sets the byte at +0x2c5 and `IsLoadingToHamlet` reads +0x2d0 (the same in both builds); the glue logs `loading, done` and `loading to the hamlet`. `flow.py` taps the middle on `loading, done` unless it's the hamlet's (that one goes on by itself) and stops at `dungeon` too. Checked on the A34 (GOG 27987, the Cove): `loading` 22.76, `loading, done` 34.72 (12.0 s, against ~9.5 s for the hamlet), the click 0.11 s later, the dungeon in play.
+- Unknown screens stop the run with a screenshot. The DLC-missing warning and a dungeon save are handled now (below).
+
+**Scripted runs** (`notes/bench/2026-10-30-1657*-script-fast.log` and the next two; seconds since Play):
+
+| | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| First frame | 1.77 | 1.79 | 1.78 |
+| SPLASH0 (start-up freezes over) | 5.46 | 5.41 | 5.44 |
+| HOR_TRAILER (SPLASH0 can't be skipped: 7.0–7.3 s) | 12.65 | 12.38 | 12.72 |
+| PREAMBLE (2.2–2.4 s of taps to get past HOR_TRAILER) | 15.05 | 14.77 | 14.88 |
+| START (PREAMBLE 3.0 s, with a 1.85 s frame) | 18.00 | 17.73 | 18.04 |
+| SAVES | 19.49 | 19.25 | 19.52 |
+| loading | 22.02 | 21.81 | 22.11 |
+| **hamlet** | **31.40** | **31.21** | **31.26** |
+
+Play → hamlet 31.2–31.4 s against the owner's 34–36 s by hand and Claude's 57 s by screenshots; the rest is the game. The loading screen itself is 9.2–9.4 s.

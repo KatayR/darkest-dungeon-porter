@@ -6,6 +6,7 @@ import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
@@ -21,6 +22,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 import android.system.Os;
@@ -937,6 +939,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private void start(int height, int fps) {
         gameH = height;
         gameW = height * 16 / 9;
+        Log.i(TAG, "Play: " + gameW + "x" + gameH + " at " + fps + " FPS");
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         touchMode = prefs.getBoolean("touch", false);
         holdRightClick = prefs.getBoolean("holdRightClick", true);
@@ -990,23 +993,34 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             hideSystemBars();
     }
 
+    private boolean debuggable() {
+        return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
+    }
+
     private void startGame(String socket) {
         File home = getFilesDir();
         String nativeDir = getApplicationInfo().nativeLibraryDir;
         try {
+            long t0 = SystemClock.elapsedRealtime();
             extractAssets("x64lib", new File(home, "x64lib"));
             if (!gameBinary().exists()) {
                 Log.e(TAG, "game data missing: import it from the launch screen");
                 return;
             }
+            long t1 = SystemClock.elapsedRealtime();
             renameModFolders();
+            long t2 = SystemClock.elapsedRealtime();
             File mirror = mirrorGame(gameDir(), new File(home, "game"));
+            Log.i(TAG, "before the game: assets " + (t1 - t0) + " ms, mod folders " + (t2 - t1) + " ms, mirror "
+                    + (SystemClock.elapsedRealtime() - t2) + " ms");
             ProcessBuilder pb = new ProcessBuilder(nativeDir + "/libddhost.so");
             pb.environment().put("DD_GAME_DIR", mirror.getAbsolutePath());
             pb.environment().put("DD_HOME", home.getAbsolutePath());
             pb.environment().put("DD_NATIVE_DIR", nativeDir);
             pb.environment().put("DD_SOCKET", socket);
             pb.environment().put("LD_LIBRARY_PATH", nativeDir);
+            if (debuggable())
+                pb.environment().put("DD_BENCH", "1");   // ddglue's load-time timeline (tag ddbench)
             pb.redirectErrorStream(true);
             pb.redirectOutput(new File(home, "dd.log"));
             gameProcess = pb.start();
@@ -1085,6 +1099,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     private boolean onTouch(MotionEvent e) {
         int action = e.getActionMasked();
+        if (debuggable() && action != MotionEvent.ACTION_MOVE)   // the load-time timeline (see ddglue's ddbench)
+            Log.i(TAG, "touch " + MotionEvent.actionToString(action) + " at " + (int) e.getX(e.getActionIndex())
+                    + "," + (int) e.getY(e.getActionIndex()) + ", " + e.getPointerCount() + " finger(s)");
         if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP || action == MotionEvent.ACTION_CANCEL)
             handler.removeCallbacks(sendLogs);         // a finger lifted before the four were held long enough
         if (touchMode)

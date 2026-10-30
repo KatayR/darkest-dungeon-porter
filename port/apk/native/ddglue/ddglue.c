@@ -27,6 +27,7 @@
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
 // Protocol: ../common/ddproto.h.
+#define _GNU_SOURCE   // process_vm_readv
 #include "SDL.h"
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -34,6 +35,7 @@
 #include <GLES2/gl2ext.h>
 #include <android/hardware_buffer.h>
 #include <android/log.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include <elf.h>
 #include <errno.h>
@@ -45,6 +47,8 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
+#include <time.h>
 #include <unistd.h>
 #include "gl4esinit.h"
 #include "../common/ddfence.h"
@@ -158,12 +162,198 @@ static void connect_app(void) {
     LOG("app surface %dx%d, %d refreshes per frame", width, height, refreshes);
 }
 
+// ---- benchmark ----
+// With DD_BENCH (set by debuggable builds), a timeline for load-time work under the tag ddbench:
+// the presses the game receives, frames that took over STALL_MS, and once a second what the process
+// did (frames, CPU by thread, bytes read, major page faults). logcat's timestamps place each line.
+#define BENCH(...) do { if (bench) __android_log_print(ANDROID_LOG_INFO, "ddbench", __VA_ARGS__); } while (0)
+#define STALL_MS    100
+#define MAX_THREADS 256
+static int bench;
+static unsigned bench_frames, bench_longest;   // since the last sample; set at each swap
+
+typedef struct {
+    int tid;
+    unsigned long long ticks;   // user + system
+    char name[16];
+} thread_cpu;
+
+// a /proc stat file's CPU ticks, major faults and name (the thread's, for a task)
+static int read_stat(const char *path, unsigned long long *ticks, unsigned long *majflt, char name[16]) {
+    char buf[512];
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+    buf[n] = 0;
+    char *open_paren = strchr(buf, '('), *close_paren = strrchr(buf, ')');
+    if (!open_paren || !close_paren)
+        return -1;
+    if (name) {
+        size_t len = close_paren - open_paren - 1;
+        if (len > 15)
+            len = 15;
+        memcpy(name, open_paren + 1, len);
+        name[len] = 0;
+    }
+    // after the name: state ppid pgrp session tty_nr tpgid flags minflt cminflt majflt cmajflt utime stime
+    unsigned long long utime, stime;
+    unsigned long faults;
+    if (sscanf(close_paren + 2, "%*c %*d %*d %*d %*d %*d %*u %*lu %*lu %lu %*lu %llu %llu",
+               &faults, &utime, &stime) != 3)
+        return -1;
+    *ticks = utime + stime;
+    if (majflt)
+        *majflt = faults;
+    return 0;
+}
+
+// /proc/self/io: bytes read by any read call, bytes read from storage, number of read calls
+static void read_io(unsigned long long *rchar, unsigned long long *disk, unsigned long long *calls) {
+    FILE *f = fopen("/proc/self/io", "re");
+    char line[128];
+    *rchar = *disk = *calls = 0;
+    if (!f)
+        return;
+    while (fgets(line, sizeof line, f)) {
+        sscanf(line, "rchar: %llu", rchar);
+        sscanf(line, "read_bytes: %llu", disk);
+        sscanf(line, "syscr: %llu", calls);
+    }
+    fclose(f);
+}
+
+static int read_threads(thread_cpu *t) {
+    DIR *dir = opendir("/proc/self/task");
+    if (!dir)
+        return 0;
+    int n = 0;
+    struct dirent *d;
+    char path[64];
+    while (n < MAX_THREADS && (d = readdir(dir))) {
+        if (d->d_name[0] == '.')
+            continue;
+        t[n].tid = atoi(d->d_name);
+        snprintf(path, sizeof path, "/proc/self/task/%s/stat", d->d_name);
+        if (read_stat(path, &t[n].ticks, NULL, t[n].name) == 0)
+            n++;
+    }
+    closedir(dir);
+    return n;
+}
+
+static double seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec / 1e9;
+}
+
+static void *sampler(void *arg) {
+    (void)arg;
+    static thread_cpu prev[MAX_THREADS], cur[MAX_THREADS];
+    double hz = sysconf(_SC_CLK_TCK), since = seconds();
+    unsigned long long ticks0 = 0, ticks, rchar0, disk0, calls0, rchar, disk, calls;
+    unsigned long majflt0 = 0, majflt;
+    int nprev = read_threads(prev);
+    read_stat("/proc/self/stat", &ticks0, &majflt0, NULL);
+    read_io(&rchar0, &disk0, &calls0);
+    for (;;) {
+        sleep(1);
+        double now = seconds(), span = (now - since) * hz / 100;   // ticks in 1% of a core
+        since = now;
+        unsigned frames = __atomic_exchange_n(&bench_frames, 0, __ATOMIC_RELAXED);
+        unsigned longest = __atomic_exchange_n(&bench_longest, 0, __ATOMIC_RELAXED);
+        if (read_stat("/proc/self/stat", &ticks, &majflt, NULL) != 0)
+            continue;
+        read_io(&rchar, &disk, &calls);
+        int ncur = read_threads(cur);
+        // the three threads that used the most CPU in this second
+        char top[160] = "";
+        unsigned long long used[MAX_THREADS];
+        for (int i = 0; i < ncur; i++) {
+            used[i] = cur[i].ticks;
+            for (int j = 0; j < nprev; j++)
+                if (prev[j].tid == cur[i].tid) {
+                    used[i] -= prev[j].ticks;
+                    break;
+                }
+        }
+        for (int k = 0; k < 3; k++) {
+            int best = -1;
+            for (int i = 0; i < ncur; i++)
+                if (used[i] && (best < 0 || used[i] > used[best]))
+                    best = i;
+            if (best < 0)
+                break;
+            size_t len = strlen(top);
+            snprintf(top + len, sizeof top - len, "%s%s %.0f%%", k ? ", " : "", cur[best].name, used[best] / span);
+            used[best] = 0;
+        }
+        BENCH("frames %u (longest %u ms), cpu %.0f%% (%s), read %.1f MB (%.1f MB from storage) in %llu calls, "
+              "%lu major faults", frames, longest, (ticks - ticks0) / span, top, (rchar - rchar0) / 1e6,
+              (disk - disk0) / 1e6, calls - calls0, majflt - majflt0);
+        memcpy(prev, cur, ncur * sizeof *cur);
+        nprev = ncur;
+        ticks0 = ticks;
+        majflt0 = majflt;
+        rchar0 = rchar;
+        disk0 = disk;
+        calls0 = calls;
+    }
+    return NULL;
+}
+
+__attribute__((constructor)) static void bench_start(void) {
+    bench = getenv("DD_BENCH") != NULL;
+    if (!bench)
+        return;
+    BENCH("glue loaded");
+    pthread_t t;
+    pthread_create(&t, NULL, sampler, NULL);
+}
+
+// at each swap: the first frame, and frames that took long
+static void bench_frame(void) {
+    static Uint32 last;
+    if (!bench)
+        return;
+    Uint32 now = SDL_GetTicks(), took = now - last;
+    if (!last)
+        BENCH("first frame");
+    else if (took > STALL_MS)
+        BENCH("stall: a frame took %u ms", took);
+    if (last) {
+        Uint32 longest = __atomic_load_n(&bench_longest, __ATOMIC_RELAXED);
+        while (took > longest && !__atomic_compare_exchange_n(&bench_longest, &longest, took, 0,
+                                                              __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+            ;
+    }
+    __atomic_add_fetch(&bench_frames, 1, __ATOMIC_RELAXED);
+    last = now;
+}
+
+// a press the game receives
+static void bench_press(const SDL_Event *e) {
+    if (!bench)
+        return;
+    if (e->type == SDL_MOUSEBUTTONDOWN)
+        BENCH("press: mouse button %d at %d,%d", e->button.button, e->button.x, e->button.y);
+    else if (e->type == SDL_KEYDOWN)
+        BENCH("press: key %s", SDL_GetScancodeName(e->key.keysym.scancode));
+    else if (e->type == SDL_CONTROLLERBUTTONDOWN)
+        BENCH("press: controller %s", SDL_GameControllerGetStringForButton(e->cbutton.button));
+}
+
 // ---- subsystems ----
 // On Android these talk to SDL's Java side, which this process doesn't have. Controllers come from
 // the app instead (see "controller" below).
 #define NEEDS_JAVA (SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC | SDL_INIT_SENSOR)
 
 int SDL_Init(Uint32 flags) {
+    BENCH("game calls SDL_Init");
     init_real();
     SDL_SetMainReady();   // done by SDL's Java side on Android; without it audio init refuses
     return real.Init(flags & ~NEEDS_JAVA);
@@ -249,6 +439,24 @@ static long battle_state_in_raid;   // the battle's state in Raid (battle + its 
 static long loading_flag;     // the loading screen's active byte in LoadingScreen
 static long menu_state;       // the menu panel's state in a screen (menu + its state)
 static long menu_page;        // the menu's page in a screen (menu + its page)
+// the benchmark's screen line (bench_screen), from the same symbols and code:
+// - the front end (title, splashes, save list): FrontEndDisplay::s_Instance and its state, the int at +0x1b38
+//   (FrontEndDisplay::IsPastStart), named by FrontEndDisplay::ToString's table of 11 names;
+// - dialogs (ConfirmDialog::System::s_Instance): a queue of entries, the first one shown, shown while not
+//   empty (GetIsEntriesInQueue): a deque in Steam 28212 (its finish at +0x30 against its start at +0x10), a
+//   vector in GOG 27987 (its begin at +0 against its end at +8). An entry holds its parameters at +8
+//   (ENTRY_PARAMETERS: ShowEntry reads the answers at +0x208 in both builds): first the text (512 chars),
+//   the answers a vector at +0x200 (PushEntryInternal), 0x128 bytes each, text first;
+// - a video (VideoScreen::s_Instance);
+// - the loading screen (above) done, which then waits for a click before a dungeon: the byte at +0x2c5
+//   (set by LoadingScreen::DoneLoading), and whether it loads the hamlet: the byte at +0x2d0
+//   (LoadingScreen::IsLoadingToHamlet), which finishes by itself.
+static char **front_end, **video, **dialogs;
+static long loading_done, loading_hamlet;
+#define ENTRY_PARAMETERS 8
+static long front_end_state, dialog_front, dialog_back, dialog_answers, answer_size;   // front: the shown entry
+static const char *const *front_end_names;
+static long front_end_count;
 
 // the offset in the instruction at addr in the game's code, whose bytes are those of the template
 // except the offset's own (size bytes at at, little-endian); -1 if the code there differs
@@ -295,6 +503,8 @@ static void find_game_state(void) {
             symtab = &sh[i];
         else if (!strcmp(section_names + sh[i].sh_name, ".text"))
             text = &sh[i];
+    Elf64_Addr past_start = 0, to_string = 0, dialog_instance = 0, in_queue = 0, push_entry = 0, done_loading = 0,
+               to_hamlet = 0;
     Elf64_Addr instance = 0, visible = 0, provisions_visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
                loading_instance = 0, loading_active = 0, menu_active = 0, child_page = 0;
     // the screens with an Escape menu, in the order of screens[]
@@ -335,6 +545,20 @@ static void find_game_state(void) {
                 menu_active = sym[i].st_value;
             else if (!strcmp(s, "_ZNK2UI5Panel4Menu19IsInChildPanelStateEv"))
                 child_page = sym[i].st_value;
+            else if (!strcmp(s, "_ZN13LoadingScreen11DoneLoadingEv"))
+                done_loading = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK13LoadingScreen17IsLoadingToHamletEv"))
+                to_hamlet = sym[i].st_value;
+            else if (!strcmp(s, "_ZN12FrontEndFlow6Screen15FrontEndDisplay11IsPastStartEv"))
+                past_start = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK12FrontEndFlow6Screen15FrontEndDisplay8ToStringENS1_6States6eStateE"))
+                to_string = sym[i].st_value;
+            else if (!strcmp(s, "_ZN13ConfirmDialog6System10s_InstanceE"))
+                dialog_instance = sym[i].st_value;
+            else if (!strcmp(s, "_ZN13ConfirmDialog6System19GetIsEntriesInQueueEv"))
+                in_queue = sym[i].st_value;
+            else if (!strcmp(s, "_ZN13ConfirmDialog6System17PushEntryInternalERKNS_15EntryParametersE"))
+                push_entry = sym[i].st_value;
         }
     }
     // the instructions that read the state, with 27988's offsets (any offset matches)
@@ -363,6 +587,61 @@ static void find_game_state(void) {
     if (menu_active && child_page) {
         menu = CODE_OFFSET(menu_active, add_menu, 3, 4);
         page = CODE_OFFSET(child_page, mov_page, 2, 1);
+    }
+    if (bench) {   // the templates hold Steam 28212's offsets; GOG 27987 has the same but for the dialog queue
+        static const unsigned char cmp_past_start[] = { 0x83, 0xbf, 0x38, 0x1b, 0x00, 0x00, 0x06 };   // cmpl $6,0x1b38(%rdi)
+        static const unsigned char cmp_states[] = { 0x83, 0xfe, 0x0b };                               // cmp $0xb,%esi
+        static const unsigned char mov_names[] = { 0x48, 0x8b, 0x04, 0xc5, 0x50, 0xb4, 0x91, 0x01 };   // mov 0x191b450(,%rax,8),%rax
+        static const unsigned char mov_back[] = { 0x48, 0x8b, 0x47, 0x30 };                           // mov 0x30(%rdi),%rax
+        static const unsigned char cmp_front[] = { 0x48, 0x3b, 0x47, 0x10 };                          // cmp 0x10(%rdi),%rax
+        static const unsigned char mov_begin[] = { 0x48, 0x8b, 0x07 };                                // mov (%rdi),%rax
+        static const unsigned char cmp_end[] = { 0x48, 0x3b, 0x47, 0x08 };                            // cmp 0x8(%rdi),%rax
+        static const unsigned char mov_answers[] = { 0x49, 0x8b, 0x8e, 0x00, 0x02, 0x00, 0x00 };      // mov 0x200(%r14),%rcx
+        static const unsigned char imul_answer[] = { 0x48, 0x69, 0xd0, 0x28, 0x01, 0x00, 0x00 };      // imul $0x128,%rax,%rdx
+        long state = -1, count = -1, names = -1, back = -1, front = -1;
+        if (screen_instance[3] && past_start && to_string) {
+            state = CODE_OFFSET(past_start, cmp_past_start, 2, 4);
+            count = CODE_OFFSET(to_string, cmp_states, 2, 1);
+            names = CODE_OFFSET(to_string + 7, mov_names, 4, 4);   // after the cmp and jae, mov %esi,%eax
+        }
+        if (state < 0 || count <= 0 || names <= 0)
+            BENCH("no front end in the screen lines: this game build reads it differently");
+        else {
+            front_end = (char **)screen_instance[3];
+            front_end_state = state;
+            front_end_names = (const char *const *)names;
+            front_end_count = count;
+        }
+        if (dialog_instance && in_queue) {
+            back = CODE_OFFSET(in_queue, mov_back, 3, 1);   // a deque: its finish, then its start
+            front = CODE_OFFSET(in_queue + 4, cmp_front, 3, 1);
+            if (back < 0 || front < 0) {   // a vector: its begin, then its end
+                front = CODE_OFFSET(in_queue, mov_begin, 3, 0);
+                back = CODE_OFFSET(in_queue + 3, cmp_end, 3, 1);
+            }
+        }
+        if (back < 0 || front < 0)
+            BENCH("no dialogs in the screen lines: this game build reads them differently");
+        else {
+            dialogs = (char **)dialog_instance;
+            dialog_front = front;
+            dialog_back = back;
+            if (push_entry) {   // without them, a dialog's text alone
+                dialog_answers = CODE_OFFSET(push_entry + 0x56, mov_answers, 3, 4);
+                answer_size = CODE_OFFSET(push_entry + 0xc1, imul_answer, 3, 4);
+            }
+        }
+        video = (char **)screen_instance[5];
+        static const unsigned char movb_done[] = { 0xc6, 0x87, 0xc5, 0x02, 0x00, 0x00, 0x01 };   // movb $1,0x2c5(%rdi)
+        static const unsigned char movzb_hamlet[] = { 0x0f, 0xb6, 0x87, 0xd0, 0x02, 0x00, 0x00 };  // movzbl 0x2d0(%rdi),%eax
+        long done = done_loading ? CODE_OFFSET(done_loading, movb_done, 2, 4) : -1;
+        long hamlet = to_hamlet ? CODE_OFFSET(to_hamlet, movzb_hamlet, 3, 4) : -1;
+        if (done < 0 || hamlet < 0)
+            BENCH("no loading screen's end in the screen lines: this game build reads it differently");
+        else {
+            loading_done = done;
+            loading_hamlet = hamlet;
+        }
     }
 #undef CODE_OFFSET
     int all_screens = 1;
@@ -463,6 +742,72 @@ static void check_game_state(void) {
             LOG("controls card %s", menu ? "shown" : "hidden");
             send_msg(DD_MENU_SCREEN, menu, 0, 0, 0);
         }
+    }
+}
+
+// copies len bytes of the game's memory; -1 instead of a crash if any of it isn't mapped
+static int safe_read(const void *addr, void *buf, size_t len) {
+    struct iovec local = { buf, len }, remote = { (void *)addr, len };
+    return process_vm_readv(getpid(), &local, 1, &remote, 1, 0) == (ssize_t)len ? 0 : -1;
+}
+
+// appends up to max chars of a game string at addr to line, control characters as spaces;
+// "?" if it can't be read
+static void append_text(char *line, size_t size, const char *addr, size_t max) {
+    char text[128];
+    if (max > sizeof text - 1)
+        max = sizeof text - 1;
+    if (safe_read(addr, text, max) != 0) {
+        strlcat(line, "?", size);
+        return;
+    }
+    text[max] = 0;
+    size_t n = strlen(line);
+    for (size_t i = 0; text[i] && n + 1 < size; i++)
+        line[n++] = (unsigned char)text[i] < ' ' ? ' ' : text[i];
+    line[n] = 0;
+}
+
+// with DD_BENCH, a ddbench line "screen: ..." whenever what shows changes: loading, dungeon, hamlet or the
+// front end's state, then a video and a dialog with its text and answers. notes/bench/flow.py taps by it.
+static void bench_screen(void) {
+    static char last[640];
+    char line[640] = "";
+    char *l = loading ? *loading : NULL;
+    if (l && l[loading_flag])
+        snprintf(line, sizeof line, "loading%s%s", loading_hamlet && l[loading_hamlet] ? " to the hamlet" : "",
+                 loading_done && l[loading_done] ? ", done" : "");
+    else if (raid && *raid)
+        strcpy(line, "dungeon");
+    else if (town_display && *town_display)
+        strcpy(line, "hamlet");
+    else if (front_end && *front_end) {
+        int s = *(int *)(*front_end + front_end_state);
+        snprintf(line, sizeof line, "front end %s", s >= 0 && s < front_end_count ? front_end_names[s] : "?");
+    }
+    if (video && *video)
+        strcat(line, ", video");
+    char *system = dialogs ? *dialogs : NULL;
+    if (system && *(char **)(system + dialog_back) != *(char **)(system + dialog_front)) {
+        // read with safe_read: a wrong offset must not crash the game
+        const char *entry = *(char **)(system + dialog_front) + ENTRY_PARAMETERS, *answers[2];
+        strcat(line, ", dialog \"");
+        append_text(line, sizeof line, entry, 100);
+        strcat(line, "\"");
+        if (dialog_answers > 0 && answer_size > 0) {
+            if (safe_read(entry + dialog_answers, answers, sizeof answers) != 0 || answers[1] < answers[0]
+                    || (answers[1] - answers[0]) % answer_size || (answers[1] - answers[0]) / answer_size > 8)
+                strcat(line, ": (answers unreadable)");
+            else
+                for (const char *a = answers[0]; a < answers[1] && a < answers[0] + 4 * answer_size; a += answer_size) {
+                    strcat(line, a == answers[0] ? ": " : " | ");
+                    append_text(line, sizeof line - 8, a, 60);
+                }
+        }
+    }
+    if (strcmp(line, last)) {
+        strcpy(last, line);
+        BENCH("screen: %s", line[0] ? line : "none");
     }
 }
 
@@ -618,6 +963,8 @@ int SDL_GL_GetSwapInterval(void) {
 void SDL_GL_SwapWindow(SDL_Window *window) {
     (void)window;
     check_game_state();
+    if (bench)
+        bench_screen();
     gl4es_pre_swap();
     // a free buffer, and the previous frame on screen (the app then holds only that one)
     int i = 0, need = DD_BUFFERS - 1;
@@ -664,6 +1011,7 @@ void SDL_GL_SwapWindow(SDL_Window *window) {
     if (done >= 0)
         close(done);
     gl4es_post_swap();
+    bench_frame();
 
     static Uint32 since;
     static int frames;
@@ -962,8 +1310,10 @@ int SDL_PollEvent(SDL_Event *ev) {
         return 1;
     }
     while (next_for_game(ev))
-        if (!pad_event(ev))
+        if (!pad_event(ev)) {
+            bench_press(ev);
             return 1;
+        }
     return 0;
 }
 

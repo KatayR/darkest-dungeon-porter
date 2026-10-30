@@ -110,3 +110,8 @@ Project rules learned from mistakes made during the port.
 
 ## Facts about the game outside the repo
 - Look up store and platform facts (which versions exist, on which devices) before stating them, and stop at what the source says. "Darkest Dungeon has an iOS version" got stretched to "iPad and iPhone". The App Store only has the iPad-only "Darkest Dungeon: Tablet Edition" (2017).
+
+## Measuring load times
+- Don't time a flow by driving it with screenshots: each screen cost a screenshot, a look and a tap, 5–12 s apart, and Play → hamlet came out at 57 s against 31 s when a script tapped as soon as the game's state changed. Use `notes/bench/flow.py` (it taps by ddglue's `screen:` lines) and read only the game's own waits from the log.
+- A tap the game receives is not a tap it acts on: the title and the save list ignore clicks for about 1–1.5 s after they show. Repeat a tap until the screen changes rather than assuming the first one counted.
+- A Python edit sent through a Bash heredoc broke `\n` again (flow.py's XML strings); the rule under Build hygiene holds for Python editing Python too. Use the Edit tool for any text with escapes.
