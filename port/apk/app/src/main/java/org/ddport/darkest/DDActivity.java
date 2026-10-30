@@ -73,6 +73,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
@@ -80,6 +81,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -997,6 +999,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 Log.e(TAG, "game data missing: import it from the launch screen");
                 return;
             }
+            renameModFolders();
             File mirror = mirrorGame(gameDir(), new File(home, "game"));
             ProcessBuilder pb = new ProcessBuilder(nativeDir + "/libddhost.so");
             pb.environment().put("DD_GAME_DIR", mirror.getAbsolutePath());
@@ -2097,18 +2100,33 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 } catch (IOException e) {
                     Log.w(TAG, "unreadable " + project, e);
                 }
-                mods.add(new Mod(dir, title.isEmpty() ? dir.getName().replaceFirst("\\.json$", "") : title));
+                mods.add(new Mod(dir, title.isEmpty() ? dir.getName() : title));
             }
         mods.sort(Comparator.comparing(m -> m.title.toLowerCase(Locale.ROOT)));
         return mods;
     }
 
     /**
+     * Renames each mod folder with a "." in its name (mods/<title>.json/, as this app named them before
+     * patchModLoader) to its folderName. Saves know a mod by its title, not its folder.
+     */
+    private void renameModFolders() {
+        for (Mod mod : installedMods()) {
+            if (!mod.dir.getName().contains("."))
+                continue;
+            File dest = new File(modsDir(), folderName(mod.title));
+            if (dest.exists() || !mod.dir.renameTo(dest))
+                Log.w(TAG, "couldn't rename " + mod.dir + " to " + dest);
+        }
+    }
+
+    /**
      * Adds the mods in the picked archives. A mod is a folder holding a project.xml (the archive's root
-     * counts); one inside another is part of it. Each goes to mods/<title>.json/ with its project.xml rewritten as
-     * JSON: the game's XML reader (UGCProjectMetadata::ReadXMLFile) drops every value, so a mod read from
-     * XML has no title, and all such mods share one empty id in saves. Its JSON reader works, and the game
-     * uses it whenever the path holds ".json". An installed mod with the same title or folder is replaced.
+     * counts); one inside another is part of it. Each goes to mods/<title>/ (see folderName) with its
+     * project.xml rewritten as JSON: the game's XML reader (UGCProjectMetadata::ReadXMLFile) drops every
+     * value, so a mod read from XML has no title, and all such mods share one empty id in saves. Its JSON
+     * reader works, and patchModLoader makes the game use it for every mod. An installed mod with the same
+     * title or folder is replaced.
      * The archives are unpacked into mods.import/ first, so a half-unpacked mod never shows in the game.
      */
     private String unpackMods(List<Uri> files) throws IOException {
@@ -2137,7 +2155,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
                 File modFiles = new File(dir, MOD_FILES);
                 if (!modFiles.exists())
                     writeModFiles(dir, modFiles);
-                String folder = folderName(title) + ".json";
+                String folder = folderName(title);
                 for (Mod mod : installedMods())
                     if (mod.title.equals(title) || mod.dir.getName().equalsIgnoreCase(folder))
                         deleteTree(mod.dir);
@@ -2378,10 +2396,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     /** A mod's title as a folder name: letters, digits and a few signs kept, others as _, at most 48 long. */
     private static String folderName(String title) {
-        String name = title.replaceAll("[^A-Za-z0-9 ._()-]", "_");
+        // no ".": the game names a curio's sprite by its path cut at the last "." twice (see patchModLoader)
+        String name = title.replaceAll("[^A-Za-z0-9 _()-]", "_");
         if (name.length() > 48)   // the game keeps paths under mods/ in 256 characters
             name = name.substring(0, 48);
-        name = name.replaceAll("^[ .]+|[ .]+$", "");
+        name = name.trim();
         return name.isEmpty() ? "mod" : name;
     }
 
@@ -2646,7 +2665,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         link(game, mirror, "_linuxnosteam");
         File linux = new File(game, "_linuxnosteam");
         File mirrorLinux = new File(mirror, "_linuxnosteam");
-        copyIfChanged(new File(linux, "darkest.bin.x86_64"), new File(mirrorLinux, "darkest.bin.x86_64"));
+        copyGameBinary(new File(linux, "darkest.bin.x86_64"), new File(mirrorLinux, "darkest.bin.x86_64"));
         File[] libs = new File(linux, "lib64").listFiles();
         if (libs != null)
             for (File lib : libs)
@@ -2681,6 +2700,63 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
         dest.setLastModified(src.lastModified());
         dest.setExecutable(true);
+    }
+
+    /**
+     * Copies the game's binary to dest with patchModLoader applied, once per binary: dest.stamp holds the
+     * source's size and time.
+     */
+    private static void copyGameBinary(File src, File dest) throws Exception {
+        File stampFile = new File(dest.getPath() + ".stamp");
+        String stamp = src.length() + " " + src.lastModified();
+        if (dest.isFile() && stampFile.isFile() && stamp.equals(new String(Files.readAllBytes(stampFile.toPath()))))
+            return;
+        dest.getParentFile().mkdirs();
+        Files.copy(src.toPath(), dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        dest.setExecutable(true);
+        patchModLoader(dest);
+        Files.write(stampFile.toPath(), stamp.getBytes());
+    }
+
+    /**
+     * Makes UGCProjectMetadata::Load read every mod's project.xml with the game's JSON reader. It takes
+     * that reader only when the path holds ".json", and its XML reader drops every value (see unpackMods),
+     * so mods once went to mods/<title>.json/. But the game names a curio's sprite by its .skel's path cut
+     * at the last "." twice, so a "." in a mod's folder gave all its curios the folder's name. The patch
+     * is the je after Load's strstr(path, ".json"), found by its bytes: in GOG's and Steam's builds alike.
+     */
+    private static void patchModLoader(File binary) throws IOException {
+        //  be ????          mov   esi, ".json"
+        //  4c 89 ff         mov   rdi, r15
+        //  e8 ????????      call  strstr
+        //  48 85 c0         test  rax, rax
+        //  74 30            je    (the XML reader)    → 90 90
+        //  48 89 df ...  e8 call  ReadJSONFile(rbx, r12, r14)
+        final int[] code = { 0xbe, -1, -1, -1, -1, 0x4c, 0x89, 0xff, 0xe8, -1, -1, -1, -1, 0x48, 0x85, 0xc0,
+                0x74, 0x30, 0x48, 0x89, 0xdf, 0x4c, 0x89, 0xe6, 0x4c, 0x89, 0xf2, 0xe8 };
+        final int je = 16;
+        try (FileChannel ch = FileChannel.open(binary.toPath(), StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+            MappedByteBuffer b = ch.map(FileChannel.MapMode.READ_WRITE, 0, ch.size());
+            int found = -1;
+            outer:
+            for (int i = 0, end = b.limit() - code.length; i <= end; i++) {
+                for (int j = 0; j < code.length; j++)
+                    if (code[j] >= 0 && (b.get(i + j) & 0xff) != code[j])
+                        continue outer;
+                if (found >= 0) {
+                    Log.w(TAG, "mod loader not patched: its code is in the binary more than once");
+                    return;
+                }
+                found = i;
+            }
+            if (found < 0) {
+                Log.w(TAG, "mod loader not patched: its code isn't in the binary");
+                return;
+            }
+            b.put(found + je, (byte) 0x90).put(found + je + 1, (byte) 0x90);
+            b.force();
+            Log.i(TAG, "mod loader patched at 0x" + Integer.toHexString(found + je));
+        }
     }
 
     /** Copies assets/<dir>/* to dest once per installed APK version (tracked in dest/.stamp). */
