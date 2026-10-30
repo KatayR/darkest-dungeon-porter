@@ -10,7 +10,7 @@ Runs your own GOG or Steam copy of **Darkest Dungeon®** (the Linux version) nat
 
 ## Requirements
 - Android 12 or newer, 64-bit ARM (arm64-v8a).
-- A GPU with OpenGL ES 2 and `GL_OES_texture_3D` (the game's colour grading needs it).
+- A GPU with OpenGL ES 2. The game's colour grading uses 3D textures; drivers without `GL_OES_texture_3D` (some PowerVR) get them emulated with 2D textures.
 - About 4.5 GB of free storage for the import: the installer (about 1.9 GB) or the Steam zip (about 2.1 GB, more with DLCs), plus 2.5 GB for the game (the import doesn't start with less free than the files unpack to). Afterwards you can delete the installer or zip, and the game uses about 2.5 GB. DLCs need more (The Color of Madness: a 0.5 GB installer, 0.65 GB in the game).
 - One of:
   - GOG's **Linux** installer of Darkest Dungeon (`darkest_dungeon_…_linux_….sh`), and optionally its DLC installers. Tested with build 27988, The Musketeer and The Color of Madness.

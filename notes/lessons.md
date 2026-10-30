@@ -4,6 +4,7 @@ Project rules learned from mistakes made during the port.
 
 ## Verifying input
 - When a phone test needs a long trackpad walk through menus (blind swipes, screenshots, re-aiming), ask the owner to do those steps by hand rather than driving them over adb. Typing and clicking through the game by adb took many slow rounds that a person does in seconds; keep adb for logs, screenshots and short exact checks.
+- For repeated test walks (start the game, load the last save, screenshot the dungeon), hand the driving to a subagent with the trackpad notes (relative cursor, ~0.73 screenshot-px per swipe px, a 120 ms in-place swipe as the click) and load the save without waiting for the owner. Driving it in the main conversation filled the context with screenshots.
 - A screenshot of the game running does not prove input works. Before calling controls done, test an *instant* click (e.g. `xdotool click 1`) and confirm the game reacts, since real taps on a touch layer are often zero-length.
 
 ## Measuring FPS
@@ -35,7 +36,9 @@ Project rules learned from mistakes made during the port.
 ## gl4es
 - A shader that compiles and links can still sample nothing: gl4es binds textures at draw time (`realize_textures()`) and, upstream, picks each unit's target from the fixed-function `glEnable` bits. Any non-2D texture a shader-only game binds must be checked for reaching the GPU, not only the shader source.
 - When a whole layer renders black with no GL errors, look at what a post-process pass multiplies the scene by (a LUT, a mask) before suspecting the scene itself.
-- Emulating a missing feature (3D textures as a 2D slice atlas) can go wrong in driver-specific ways that a CPU reference never reproduces. When the driver has the real extension (`GL_OES_texture_3D` here), switch to it before debugging the emulation further. Four disproven hypotheses went into the atlas; real 3D textures fixed it in one go.
+- Emulating a missing feature (3D textures as a 2D slice atlas) can go wrong in ways a CPU reference never reproduces. When the driver has the real extension (`GL_OES_texture_3D` here), switch to it before debugging the emulation further. Four disproven hypotheses went into the atlas; real 3D textures fixed it in one go. (The atlas outlines were later traced to anisotropic filtering, below.)
+- When an emulated texture reads wrong only where neighbouring pixels read far apart, check every sampler parameter the game sets on the original texture, not just filter and wrap: here `GL_TEXTURE_MAX_ANISOTROPY`, harmless on a 16³ cube, spread the taps of the 16×256 atlas across slices. Eleven builds went into LOD, filtering, binding, precision and byte-exact readbacks first. What found it was an identity lookup table in place of the game's: with known content, the screenshot diff showed which way the reads drifted (G up, B down: into the previous slice).
+- Two experiments that change the layout and give *different* wrong colours (green with slices in a column, red in a grid) point at the sampling footprint, not at the data or the shader.
 - When the main thread waits in the driver (`waittimestamp`) under a draw call, time each draw call on the CPU and log the slow ones, with their textures and index ranges. Here one draw per frame waited ~9 ms. The cause was not its texture but client arrays: Adreno copies vertices from the attribute pointer up to the highest index, and the game indexes deep into one big ring buffer.
 
 ## Recording experiments

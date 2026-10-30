@@ -23,10 +23,44 @@ index c21bcf1f..b001d477 100644
                  case GL_INT_VEC2:
                  case GL_INT_VEC3:
 diff --git a/src/gl/program.c b/src/gl/program.c
-index 13934d27..6997dde1 100644
+index 13934d27..e9833011 100644
 --- a/src/gl/program.c
 +++ b/src/gl/program.c
-@@ -581,9 +581,9 @@ static void fill_program(program_t *glprogram)
+@@ -9,6 +9,7 @@
+ #include "glstate.h"
+ #include "loader.h"
+ #include "shaderconv.h"
++#include "string_utils.h"
+ #include "fpe_shader.h"
+ 
+ //#define DEBUG
+@@ -524,6 +525,25 @@ static void clear_program(program_t *glprogram)
+     glprogram->cache.size = 0;  // reset cache buffer
+ }
+ 
++// without GL_OES_texture_3D the converted shaders declare sampler3D as sampler2D (a 2D slice atlas,
++// shaderconv.c), so GLES reports GL_SAMPLER_2D: the original sources tell which samplers are 3D
++static int is_sampler3D(program_t *glprogram, const char *name)
++{
++    const int l = strlen(name);
++    for (int i=0; i<glprogram->attach_size; i++) {
++        shader_t *glshader = getShader(glprogram->attach[i]);
++        const char *p = glshader ? glshader->source : NULL;
++        while (p && (p = gl4es_find_string(p, "sampler3D"))) {
++            p += strlen("sampler3D");
++            while (*p==' ' || *p=='\t')
++                ++p;
++            if (!strncmp(p, name, l) && strchr(AllSeparators, p[l]))
++                return 1;
++        }
++    }
++    return 0;
++}
++
+ static void fill_program(program_t *glprogram)
+ {
+     LOAD_GLES(glGetError);
+@@ -581,9 +601,9 @@ static void fill_program(program_t *glprogram)
                          glprogram->texunits[tu_idx].type=TU_CUBE;
                          glprogram->texunits[tu_idx].req_tu = glprogram->texunits[tu_idx].act_tu = 0;
                          ++tu_idx;
@@ -34,11 +68,11 @@ index 13934d27..6997dde1 100644
 +                    } else if (type==GL_SAMPLER_2D || type==GL_SAMPLER_3D) {
                          glprogram->texunits[tu_idx].id = id;
 -                        glprogram->texunits[tu_idx].type=TU_TEX2D;
-+                        glprogram->texunits[tu_idx].type=(type==GL_SAMPLER_3D)?TU_TEX3D:TU_TEX2D;
++                        glprogram->texunits[tu_idx].type=(type==GL_SAMPLER_3D || (!hardext.texture3d && is_sampler3D(glprogram, name)))?TU_TEX3D:TU_TEX2D;
                          glprogram->texunits[tu_idx].req_tu = glprogram->texunits[tu_idx].act_tu = 0;
                          ++tu_idx;
                      }
-@@ -608,7 +608,7 @@ static void fill_program(program_t *glprogram)
+@@ -608,7 +628,7 @@ static void fill_program(program_t *glprogram)
          uniform_t *m;
          khint_t k;
          kh_foreach(glprogram->uniform, k, m,
@@ -61,10 +95,40 @@ index f8686455..9fbfb2f8 100644
      sampler->max_lod = 1000.f;
  }
 diff --git a/src/gl/shaderconv.c b/src/gl/shaderconv.c
-index 3d0f46bd..87f9f834 100644
+index 3d0f46bd..58551e95 100644
 --- a/src/gl/shaderconv.c
 +++ b/src/gl/shaderconv.c
-@@ -574,6 +574,14 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
+@@ -9,6 +9,7 @@
+ #include "string_utils.h"
+ #include "shader_hacks.h"
+ #include "logs.h"
++#include "texture.h"
+ 
+ typedef struct {
+     const char* glname;
+@@ -289,6 +290,21 @@ static const char* GLESHeader[] = {
+   "#version 300 es\n#define attribute in\n#define varying out\n%sprecision %s float;\nprecision %s int;\n"
+ };
+ 
++// without GL_OES_texture_3D, a 3D texture is a 2D slice atlas (texture_3d.c): texture3D reads the two
++// slices around z, each with the texture's own (bilinear) filter, and mixes them. x and y are clamped to
++// the texel centres, so a read never reaches into the next slice (as GL_CLAMP_TO_EDGE)
++#define TEX3D_STR2(a) #a
++#define TEX3D_STR(a) TEX3D_STR2(a)
++static const char* gl4es_texture3D =
++"vec4 gl4es_texture3D(sampler2D s, vec3 c) {\n"
++" const float n = " TEX3D_STR(TEX3D_ATLAS_EDGE) ".0;\n"
++" vec2 xy = clamp(c.xy, 0.5/n, 1.0-0.5/n);\n"
++" float z = clamp(c.z*n-0.5, 0.0, n-1.0);\n"
++" float z0 = floor(z);\n"
++" float z1 = min(z0+1.0, n-1.0);\n"
++" return mix(texture2D(s, vec2(xy.x, (z0+xy.y)/n)), texture2D(s, vec2(xy.x, (z1+xy.y)/n)), z-z0);\n"
++"}\n";
++
+ static const char* gl4es_transpose =
+ "mat2 gl4es_transpose(mat2 m) {\n"
+ " return mat2(m[0][0], m[1][0],\n"
+@@ -574,6 +590,22 @@ char* ConvertShader(const char* pEntry, int isVertex, shaderconv_need_t *need)
        Tmp = gl4es_inplace_insert(gl4es_getline(Tmp, headline-1), GLESFakeDerivative, Tmp, &tmpsize);
      headline++;
    }
@@ -76,28 +140,53 @@ index 3d0f46bd..87f9f834 100644
 +    Tmp = gl4es_inplace_insert(gl4es_getline(Tmp, headline-1), "precision mediump sampler3D;\n", Tmp, &tmpsize);
 +    headline++;
 +  }
++  // without it, a 2D slice atlas read by gl4es_texture3D. fill_program still sees these samplers as 3D
++  // ones (the original source declares them sampler3D), so they read the unit's 3D binding
++  if (!hardext.texture3d && gl4es_find_string(Tmp, "sampler3D")) {
++    Tmp = gl4es_inplace_replace(Tmp, &tmpsize, "sampler3D", "sampler2D");
++    Tmp = gl4es_inplace_replace(Tmp, &tmpsize, "texture3D", "gl4es_texture3D");
++    Tmp = gl4es_inplace_insert(gl4es_getline(Tmp, headline-1), gl4es_texture3D, Tmp, &tmpsize);
++    headline += gl4es_countline(gl4es_texture3D);
++  }
    // check if draw_buffers may be used (no fallback here :( )
    if(hardext.maxdrawbuffers>1 && strstr(pBuffer, "gl_FragData[")) {
      Tmp = gl4es_inplace_insert(gl4es_getline(Tmp, 1), useEXTDrawBuffers, Tmp, &tmpsize);
 diff --git a/src/gl/texture.h b/src/gl/texture.h
-index 33e140a3..dee8d747 100644
+index 33e140a3..dfd16207 100644
 --- a/src/gl/texture.h
 +++ b/src/gl/texture.h
-@@ -163,8 +163,7 @@ KHASH_MAP_DECLARE_INT(tex, gltexture_t *);
+@@ -4,6 +4,7 @@
+ #include "buffers.h"
+ #include "const.h"
+ #include "gles.h"
++#include "../glx/hardext.h"
+ 
+ void APIENTRY_GL4ES gl4es_glTexImage2D(GLenum target, GLint level, GLint internalFormat,
+                   GLsizei width, GLsizei height, GLint border,
+@@ -160,10 +161,17 @@ typedef struct {
+ 
+ KHASH_MAP_DECLARE_INT(tex, gltexture_t *);
+ 
++// without GL_OES_texture_3D, a 3D texture is a 2D slice atlas (texture_3d.c) that the shaders read as a
++// cube of this edge (gl4es_texture3D in shaderconv.c). The game's colour lookup cubes are all 16^3
++#define TEX3D_ATLAS_EDGE 16
++
  static inline GLenum map_tex_target(GLenum target) {
      switch (target) {
++        case GL_TEXTURE_3D:     // a real GLES 3D texture with GL_OES_texture_3D, else a 2D slice atlas (texture_3d.c)
++            if (hardext.texture3d)
++                break;
++            // fallthrough
          case GL_TEXTURE_1D:
 -        case GL_TEXTURE_3D:
--        case GL_TEXTURE_RECTANGLE_ARB:
-+        case GL_TEXTURE_RECTANGLE_ARB:  // GL_TEXTURE_3D is a real GLES 3D texture (texture_3d.c)
+         case GL_TEXTURE_RECTANGLE_ARB:
              target = GL_TEXTURE_2D;
              break;
-         case GL_PROXY_TEXTURE_1D:
 diff --git a/src/gl/texture_3d.c b/src/gl/texture_3d.c
-index e80a1f1a..d59cd00d 100644
+index e80a1f1a..64c3ef4e 100644
 --- a/src/gl/texture_3d.c
 +++ b/src/gl/texture_3d.c
-@@ -23,21 +23,87 @@
+@@ -23,21 +23,105 @@
  #define DBG(a)
  #endif
  
@@ -105,6 +194,9 @@ index e80a1f1a..d59cd00d 100644
 +// 3D textures are real GLES 3D textures (GL_OES_texture_3D). They are bound to the GLES 3D target as
 +// soon as they are bound (glBindTexture), so the active unit's 3D binding is always the bound one.
 +// Uploaded as RGBA / UNSIGNED_BYTE, converted if needed.
++// Without GL_OES_texture_3D, a W x H x D texture is a W x (H*D) 2D texture, slice z in rows z*H to
++// z*H+H-1 (the bytes of a 3D image already are in that order). The shaders read it as a cube of edge
++// TEX3D_ATLAS_EDGE (gl4es_texture3D in shaderconv.c).
 +typedef void (APIENTRY_GLES * glTexImage3D_PTR)(GLenum target, GLint level, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, const GLvoid *pixels);
 +typedef void (APIENTRY_GLES * glTexSubImage3D_PTR)(GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset, GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, const GLvoid *pixels);
 +
@@ -125,10 +217,17 @@ index e80a1f1a..d59cd00d 100644
                    GLenum format, GLenum type, const GLvoid *data) {
 +    DBG(printf("glTexImage3D(%s, %d, %s, %d, %d, %d, %d, %s, %s, %p)\n", PrintEnum(target), level, PrintEnum(internalFormat), width, height, depth, border, PrintEnum(format), PrintEnum(type), data);)
 +    FLUSH_BEGINEND;
-+    LOAD_GLES_OES(glTexImage3D);
-+    if (!hardext.texture3d || !gles_glTexImage3D) {
++    if (!hardext.texture3d) {
 +        static int warned = 0;
-+        if (!warned++) LOGE("glTexImage3D: no GL_OES_texture_3D, 3D textures stay empty\n");
++        if (level==0 && (width!=TEX3D_ATLAS_EDGE || height!=TEX3D_ATLAS_EDGE || depth!=TEX3D_ATLAS_EDGE) && !warned++)
++            LOGE("glTexImage3D: no GL_OES_texture_3D, and the 2D slice atlas reads only %d^3 cubes right (not %dx%dx%d)\n", TEX3D_ATLAS_EDGE, width, height, depth);
++        gl4es_glTexImage2D(GL_TEXTURE_3D, level, internalFormat, width, height*depth, border, format, type, data);
++        return;
++    }
++    LOAD_GLES_OES(glTexImage3D);
++    if (!gles_glTexImage3D) {
++        static int warned = 0;
++        if (!warned++) LOGE("glTexImage3D: no glTexImage3DOES, 3D textures stay empty\n");
 +        errorShim(GL_INVALID_OPERATION);
 +        return;
 +    }
@@ -172,8 +271,16 @@ index e80a1f1a..d59cd00d 100644
 -                    width, height, format, type, data);
 +    DBG(printf("glTexSubImage3D(%s, %d, %d, %d, %d, %d, %d, %d, %s, %s, %p)\n", PrintEnum(target), level, xoffset, yoffset, zoffset, width, height, depth, PrintEnum(format), PrintEnum(type), data);)
 +    FLUSH_BEGINEND;
++    if (!hardext.texture3d) {
++        // slice by slice: the rows of part of a slice aren't contiguous in the atlas
++        const int rowlength = glstate->texture.unpack_row_length ? glstate->texture.unpack_row_length : width;
++        const uintptr_t slicesize = widthalign(rowlength*pixel_sizeof(format, type), glstate->texture.unpack_align) * height;
++        for (int z=0; z<depth; z++)
++            gl4es_glTexSubImage2D(GL_TEXTURE_3D, level, xoffset, (zoffset+z)*TEX3D_ATLAS_EDGE + yoffset, width, height, format, type, (const char*)data + z*slicesize);
++        return;
++    }
 +    LOAD_GLES_OES(glTexSubImage3D);
-+    if (!hardext.texture3d || !gles_glTexSubImage3D) {
++    if (!gles_glTexSubImage3D) {
 +        errorShim(GL_INVALID_OPERATION);
 +        return;
 +    }
@@ -193,7 +300,7 @@ index e80a1f1a..d59cd00d 100644
  
  void APIENTRY_GL4ES gl4es_glTexStorage3D(GLenum target, GLsizei levels, GLenum internalformat, GLsizei width, GLsizei height, GLsizei depth)
 diff --git a/src/gl/texture_params.c b/src/gl/texture_params.c
-index 96e07205..0707b306 100644
+index 96e07205..a7ddca3e 100644
 --- a/src/gl/texture_params.c
 +++ b/src/gl/texture_params.c
 @@ -197,7 +197,7 @@ void APIENTRY_GL4ES gl4es_glBindTexture(GLenum target, GLuint texture) {
@@ -201,19 +308,22 @@ index 96e07205..0707b306 100644
          LOAD_GLES(glBindTexture);
          switch(target) {
 -            // cube map are immediately bound, other are defered and will be applied with realize_bound or realize_textures
-+            // cube map and 3D textures are immediately bound, other are defered and will be applied with realize_bound or realize_textures
++            // cube map and real 3D textures are immediately bound, other are defered and will be applied with realize_bound or realize_textures
              case GL_TEXTURE_CUBE_MAP:
              case GL_TEXTURE_CUBE_MAP_POSITIVE_X:
              case GL_TEXTURE_CUBE_MAP_NEGATIVE_X:
-@@ -207,9 +207,14 @@ void APIENTRY_GL4ES gl4es_glBindTexture(GLenum target, GLuint texture) {
+@@ -207,9 +207,17 @@ void APIENTRY_GL4ES gl4es_glBindTexture(GLenum target, GLuint texture) {
              case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
                  gles_glBindTexture(target, tex?tex->glname:0);
                  break;
 +            case GL_TEXTURE_3D:
 +                // a real GLES 3D texture (texture_3d.c), on the active unit (glActiveTexture is defered).
-+                // Its sampler is applied with realize_textures, as for the others
-+                realize_active();
-+                gles_glBindTexture(GL_TEXTURE_3D, tex?tex->glname:0);
++                // Its sampler is applied with realize_textures, as for the others. Without
++                // GL_OES_texture_3D it is a 2D slice atlas, defered like the 2D ones
++                if (hardext.texture3d) {
++                    realize_active();
++                    gles_glBindTexture(GL_TEXTURE_3D, tex?tex->glname:0);
++                }
 +                // fallthrough
              case GL_TEXTURE_1D:
              case GL_TEXTURE_2D:
@@ -221,17 +331,32 @@ index 96e07205..0707b306 100644
              case GL_TEXTURE_RECTANGLE_ARB:
                  if (glstate->bound_changed < glstate->texture.active+1)
                      glstate->bound_changed = glstate->texture.active+1;
-@@ -721,8 +726,7 @@ void realize_bound(int TMU, GLenum target) {
+@@ -339,6 +347,10 @@ void APIENTRY_GL4ES gl4es_glTexParameterfv(GLenum target, GLenum pname, const GL
+                 }
+                 if(param>hardext.aniso) param=hardext.aniso;
+                 texture->aniso = param;
++                // not on a 2D slice atlas (texture_3d.c): its taps spread along the footprint, which
++                // jumps by whole slices between neighbouring pixels, and mix in the wrong slices
++                if(itarget==ENABLED_TEX3D && !hardext.texture3d)
++                    return;
+                 break;
+         }
+         FLUSH_BEGINEND;
+@@ -719,9 +731,12 @@ void realize_bound(int TMU, GLenum target) {
+     LOAD_GLES(glDisable);
+ #endif
      switch (target) {
++        case GL_TEXTURE_3D:     // a real GLES 3D texture is bound by glBindTexture already
++            if (hardext.texture3d)
++                break;
++            // fallthrough: a 2D slice atlas (texture_3d.c)
          case GL_TEXTURE_1D:
          case GL_TEXTURE_2D:
 -        case GL_TEXTURE_3D:
--        case GL_TEXTURE_RECTANGLE_ARB:
-+        case GL_TEXTURE_RECTANGLE_ARB:  // GL_TEXTURE_3D is bound by glBindTexture already
+         case GL_TEXTURE_RECTANGLE_ARB:
  #ifdef TEXSTREAM
              if(glstate->bound_stream[TMU]) {
-                 realize_active();
-@@ -843,6 +847,16 @@ void realize_1texture(GLenum target, int wantedTMU, gltexture_t* tex, glsampler_
+@@ -843,6 +858,16 @@ void realize_1texture(GLenum target, int wantedTMU, gltexture_t* tex, glsampler_
          gles_glTexParameteri(target, GL_TEXTURE_WRAP_T, param);
          tex->actual.wrap_t=param;
      }
@@ -248,7 +373,7 @@ index 96e07205..0707b306 100644
      if(wantedTMU==-2) {
          if (oldtex!=tex->glname) gles_glBindTexture(GL_TEXTURE_2D, oldtex);
      }
-@@ -859,11 +873,27 @@ void realize_textures(int drawing) {
+@@ -859,11 +884,27 @@ void realize_textures(int drawing) {
  #else
      DBG(printf("realize_textures(%d), glstate->bound_changed=%d, glstate->enable.texture[0]=%X glsate->actual_tex2d[0]=%u\n", drawing, glstate->bound_changed, glstate->enable.texture[0], glstate->actual_tex2d[0]);)
  #endif
@@ -278,16 +403,16 @@ index 96e07205..0707b306 100644
              tgt = ENABLED_TEX3D;
          else if(IS_TEXTURE_RECTANGLE(tmp))
              tgt = ENABLED_TEXTURE_RECTANGLE;
-@@ -877,7 +907,7 @@ void realize_textures(int drawing) {
+@@ -877,7 +918,7 @@ void realize_textures(int drawing) {
          GLenum target = map_tex_target(to_target(tgt));
          gltexture_t *tex = glstate->texture.bound[i][tgt];
          GLuint t = tex->glname;
 -        if(tgt!=ENABLED_CUBE_MAP) {// CUBE MAP are immediately bound
-+        if(tgt!=ENABLED_CUBE_MAP && tgt!=ENABLED_TEX3D) {// CUBE MAP and 3D textures are immediately bound
++        if(tgt!=ENABLED_CUBE_MAP && (tgt!=ENABLED_TEX3D || !hardext.texture3d)) {// CUBE MAP and real 3D textures are immediately bound
  #ifdef TEXSTREAM
              if(glstate->bound_stream[i]) {
                  realize_active();
-@@ -933,7 +963,7 @@ void realize_textures(int drawing) {
+@@ -933,7 +974,7 @@ void realize_textures(int drawing) {
                  if(!tex->mipmap_auto) {
                      // should check if glGenerateMipmap exist, and fall back to no mipmap if not
                      LOAD_GLES2_OR_OES(glGenerateMipmap);
@@ -325,14 +450,28 @@ index 98b56148..636113ad 100644
          case GL_FLOAT_VEC2:
          case GL_INT_VEC2:
 diff --git a/src/glx/hardext.c b/src/glx/hardext.c
-index c89a1237..9dfa4e89 100644
+index c89a1237..446df778 100644
 --- a/src/glx/hardext.c
 +++ b/src/glx/hardext.c
-@@ -378,6 +378,7 @@ void GetHardwareExtensions(int notest)
+@@ -1,6 +1,7 @@
+ #include "hardext.h"
+ 
+ #include "../gl/debug.h"
++#include "../gl/envvars.h"
+ #include "../gl/gl4es.h"
+ #include "../gl/init.h"
+ #include "../gl/logs.h"
+@@ -378,6 +379,13 @@ void GetHardwareExtensions(int notest)
          gles_glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &hardext.maxvattrib);
          SHUT_LOGD("Max vertex attrib: %d\n", hardext.maxvattrib);
          S("GL_OES_standard_derivatives ", derivatives, 1);
 +        S("GL_OES_texture_3D ", texture3d, 1);
++        // LIBGL_NOTEX3D=1 uses the 2D slice atlas (texture_3d.c) even where the driver has 3D textures, to test it
++        if(hardext.texture3d && ReturnEnvVarInt("LIBGL_NOTEX3D")) {
++            hardext.texture3d = 0;
++            LOGD("GL_OES_texture_3D turned off (LIBGL_NOTEX3D): 3D textures are 2D slice atlases\n");
++        } else if(!hardext.texture3d)
++            LOGD("no GL_OES_texture_3D: 3D textures are 2D slice atlases\n");
          S("GL_ARM_shader_framebuffer_fetch", shader_fbfetch, 1);
          S("GL_OES_get_program ", prgbinary, 1);
          if(!hardext.prgbinary) {
