@@ -8,6 +8,7 @@
 //   DD_HOME       app-private dir: HOME (saves, box64 cache), x64lib/
 //   DD_NATIVE_DIR the APK's native libs (gl4es libGL.so)
 //   DD_SOCKET     abstract unix socket name ddview listens on
+//   DD_GAME_ARGS  optional: the game's launch options, separated by spaces (e.g. -skipfeflow)
 // stdout/stderr (game + box64 logs) are redirected to $DD_HOME/dd.log by DDActivity.
 #include <dlfcn.h>
 #include <signal.h>
@@ -88,7 +89,13 @@ int main(void) {
         fprintf(stderr, "ddhost: cannot load libddaudio.so: %s\n", dlerror());
         return 1;
     }
-    const char *args[] = { "box64", join(game, "/_linuxnosteam/darkest.bin.x86_64"), NULL };
-    fprintf(stderr, "ddhost: starting %s\n", args[1]);
-    return box64_run(2, args, environ);
+    const char *args[16] = { "box64", join(game, "/_linuxnosteam/darkest.bin.x86_64") };
+    int argc = 2;
+    const char *options = getenv("DD_GAME_ARGS");
+    if (options) {
+        for (char *o = strtok(strdup(options), " "); o && argc < 15; o = strtok(NULL, " "))
+            args[argc++] = o;
+    }
+    fprintf(stderr, "ddhost: starting %s%s%s\n", args[1], options ? " " : "", options ? options : "");
+    return box64_run(argc, args, environ);
 }

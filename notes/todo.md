@@ -1546,3 +1546,48 @@ The flow: Play; the Red Hook logo (can't be skipped); a tap skips the Kickstarte
 | **hamlet** | **31.40** | **31.21** | **31.26** |
 
 Play → hamlet 31.2–31.4 s against the owner's 34–36 s by hand and Claude's 57 s by screenshots; the rest is the game. The loading screen itself is 9.2–9.4 s.
+
+### Skipping the splashes and the trailer (2026-10-30)
+
+Found in Steam 28212 (`llvm-objdump`); GOG 27987 has the same option and functions.
+- `FrontEndDisplay::InitializeInternal` picks the first front-end screen from `Darkest::GetFrontEndStartState()` (`Darkest` +0x1b48):
+  - 0: SPLASH0;
+  - 1: HOR_TRAILER;
+  - 2: PREAMBLE (the info dialog);
+  - 3: `PlayHORTrailer()`.
+  It then goes on the same way in every case: the save slots, the controller focus, the analytics check.
+- The game sets the start state itself in two cases:
+  - `Darkest::UpdateStateInternal` sets 1 or 2 on the way back to the main menu, so the splashes don't play again.
+  - `Darkest::ParseArguments` sets 2 for the launch option `-skipfeflowintro`, and also for `-connect_lobby`. Options are argv words that start with `-` (`ParseArguments(map, argc, argv, …)`: the first character is checked against 0x2d and trimmed off).
+  The only other thing the option touches is a byte at `Darkest` +0x16eb, and nothing reads that byte.
+- `-skipfeflow` skips the whole front end and loads a save directly.
+  - It sets `Darkest` +0x16ea. The same byte is set by `-firstroombattle` and by the other debug options that clear +0x542.
+  - After `LoadAppAssets`, `UpdateStateInternal` checks the byte. If it is set, the game calls `SetProfileToNewest()` and goes to app state 1 instead of 0x16 (the front end).
+  - Despite its name, `SetProfileToNewest` doesn't pick the newest save. It takes `-profile <name>`, or `profile_0` (the first slot), and restores that save's `ProfileGameFile`. If the save's DLC isn't initialised yet, it adds the imported DLC.
+  - App state 1 is the same load as choosing a slot: `ProcessProfile`, narration, then `LoadingScreen::StartFirstScreen`, which goes on to the hamlet or the dungeon.
+  - It bypasses the checks the front end does on a slot: the corrupted-slot and DLC-missing prompts, the analytics dialog, and whatever `SetupProfile`/`TryLoadSlot` prepare. Whether a save's mods still load this way is not checked.
+- `FrontEndDisplay::SkipBootSequence(bool)` exists but nothing calls it.
+- The host starts the game with no arguments: `port/apk/native/host/main.c`, `args[] = { "box64", <binary>, NULL }`.
+
+Plan:
+- [ ] Add `-skipfeflowintro` to the host's argv.
+- [ ] `flow.py` run ×3: PREAMBLE should come right after the start-up freezes instead of at ~15 s. Expected saving about 9.5 s, the SPLASH0 and HOR_TRAILER spans (CPU 29–40%, 4 MB read: waiting, not loading).
+- [ ] Check that quitting to the main menu, and the analytics dialog after a wipe, still work.
+
+The game checks 145 launch options in all, in Steam 28212: `Darkest::ParseArguments` 133, `InternalMain` 13 (window, OpenGL, Steam, cloud), `plinthStart` 4 (FMOD, volume).
+- Found by taking the string passed to each `plinthOptionSet`/`plinthOptionArgument` call, plus `InternalMain`'s direct compares. Only the names are known; the options' effects are unread except for `skipfeflowintro` and `skipfeflow`.
+- Names that may matter for load time:
+  - `disable_audio_loading_wait`
+  - `disable_monster_pre_loading`
+  - `disable_wave_audio_loading`
+  - `disablevideo`
+  - `skipvalidation`
+  - `norestore`
+  - `textsave`
+- [ ] Read what those load-time options do before trying any on a real save.
+
+**Debug button "Load save directly" (-skipfeflow) (2026-10-30):**
+- [x] Our app: the button sits at the top right of the hub, in debug builds only. `start()` takes the game's launch options and puts them in `DD_GAME_ARGS`; the "Play:" log line ends with them. The launch intent's `args` extra does the same (also debug builds only, since any app can send that intent).
+- [x] Host (`main.c`): splits `DD_GAME_ARGS` on spaces into the game's argv (at most 13 options).
+- [x] Checked on the A34 with GOG 27987 and its Cove save. The loading screen came at 4.75 s after the tap (about 22 s through the front end) and was done at 18.09 s. One click later the dungeon was in play. The party (one Vestal) is the same as in the save.
+- [ ] Next: what `-disable_monster_pre_loading` and `-disable_audio_loading_wait` do.

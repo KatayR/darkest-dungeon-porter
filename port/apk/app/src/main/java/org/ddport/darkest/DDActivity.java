@@ -223,8 +223,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             Log.e(TAG, "cannot recover the saves of an unfinished import", e);
         }
         Intent intent = getIntent();
-        if (intent.hasExtra("height"))
-            start(intent.getIntExtra("height", DEFAULT_HEIGHT), intent.getIntExtra("fps", FPS[0]));
+        if (intent.hasExtra("height"))   // launch options ("args") only in debug builds: any app can send this
+            start(intent.getIntExtra("height", DEFAULT_HEIGHT), intent.getIntExtra("fps", FPS[0]),
+                    debuggable() ? intent.getStringExtra("args") : null);
         else
             showLaunchScreen(null, null);
         hideSystemBars();   // needs the content view
@@ -295,7 +296,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         play.setTextSize(20);
         play.setMinWidth(dp(c, 260));
         play.setMinHeight(dp(c, 56));
-        play.setOnClickListener(b -> start(height, fps));
+        play.setOnClickListener(b -> start(height, fps, null));
         play.setEnabled(installed);
         if (!installed) {
             play.setBackgroundTintList(ColorStateList.valueOf(BUTTON));
@@ -305,6 +306,15 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         FrameLayout right = new FrameLayout(c);   // the game in the middle, the app's version at the bottom right
         right.addView(game, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
+        if (debuggable() && installed) {
+            // at the top right, debug builds only: the game's own launch option, no front end, straight into
+            // the save in profile_0 (or -profile's), without the save list's checks (missing DLC, a corrupted
+            // slot); see notes/todo.md
+            Button direct = button(c, "Load save directly", BUTTON, TEXT);
+            direct.setOnClickListener(b -> start(height, fps, "-skipfeflow"));
+            right.addView(direct, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.END | Gravity.TOP));
+        }
         right.addView(text(c, "v" + versionName(), 12, MUTED), new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.END | Gravity.BOTTOM));
 
@@ -936,10 +946,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         }).start();
     }
 
-    private void start(int height, int fps) {
+    /** Starts the game; `gameArgs`, if not null, are its launch options (DD_GAME_ARGS). */
+    private void start(int height, int fps, String gameArgs) {
         gameH = height;
         gameW = height * 16 / 9;
-        Log.i(TAG, "Play: " + gameW + "x" + gameH + " at " + fps + " FPS");
+        Log.i(TAG, "Play: " + gameW + "x" + gameH + " at " + fps + " FPS" + (gameArgs != null ? ", " + gameArgs : ""));
         SharedPreferences prefs = getPreferences(MODE_PRIVATE);
         touchMode = prefs.getBoolean("touch", false);
         holdRightClick = prefs.getBoolean("holdRightClick", true);
@@ -975,7 +986,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         inputManager = getSystemService(InputManager.class);
         inputManager.registerInputDeviceListener(padListener, handler);
         checkPads();
-        startGame(socket);
+        startGame(socket, gameArgs);
     }
 
     private void hideSystemBars() {
@@ -997,7 +1008,7 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         return (getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0;
     }
 
-    private void startGame(String socket) {
+    private void startGame(String socket, String gameArgs) {
         File home = getFilesDir();
         String nativeDir = getApplicationInfo().nativeLibraryDir;
         try {
@@ -1019,6 +1030,8 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
             pb.environment().put("DD_NATIVE_DIR", nativeDir);
             pb.environment().put("DD_SOCKET", socket);
             pb.environment().put("LD_LIBRARY_PATH", nativeDir);
+            if (gameArgs != null)
+                pb.environment().put("DD_GAME_ARGS", gameArgs);
             if (debuggable())
                 pb.environment().put("DD_BENCH", "1");   // ddglue's load-time timeline (tag ddbench)
             pb.redirectErrorStream(true);
