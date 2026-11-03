@@ -14,6 +14,7 @@ Project rules learned from mistakes made during the port.
 - Before calling a lower FPS a regression, A/B the committed build in the same scene. The Ruins room stood at 51–54 after a change, but the committed build did 48–52 there: the room was slow before.
 
 ## Plan gates
+- A plan states the cost players will notice, such as delay, missed cases or extra taps, next to its approach, not only in the risks. The first achievements plan watched the save file "without touching game code" and left out that pop-ups would wait for the game's next save. Once that was pointed out, the approach changed to a hook.
 - A gate whose result goes past its threshold (the plan said "a handful of missing symbols"; the result was ~35 plus ABI differences) stops the work until it is re-planned, with the options written down. It is not quietly judged "still patchable" while building goes on: the gate exists so that choice is made deliberately.
 
 ## Android storage and shell
@@ -85,7 +86,7 @@ Project rules learned from mistakes made during the port.
 - Python edits to Windows paths: a backslash-t in a normal string literal is a tab (`System32\tar.exe` broke this way, twice). Use raw strings, or edit the file directly in an editor.
 
 ## Release notes
-- Run `git fetch` and compare with `origin/main` before starting work and again before a commit, version bump or release: the owner also commits from another computer. A day of mods work started on a checkout four commits behind (0.5.2 and a fix pushed elsewhere), so the app still said 0.5.1 and the next version had to be worked out from the remote.
+- Run `git fetch` and compare with `origin/main` before starting work and again before a commit, version bump or release: the owner also commits from another computer. A day of mods work started on a checkout four commits behind (0.5.2 and a fix pushed elsewhere), so the app still said 0.5.1 and the next version had to be worked out from the remote. It happened again with achievements: planned and coded 23 commits behind (0.5.3 to 0.6.2), with an own save reader written although `SaveFile.java` had one upstream. Pull in every repo, as the very first step.
 - A release's notes hold only what is new in it and the signing certificate's SHA-256, nothing else: no intro line ("Runs your own GOG or Steam copy…"), no install steps, no test list, no README pointer. Those belong in the README; copied into each release, they repeat down the whole Releases page.
 
 ## App lifecycle
