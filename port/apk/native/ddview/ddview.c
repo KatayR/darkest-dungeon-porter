@@ -5,8 +5,8 @@
 // ones, this sends absolute positions to the game; touch mode may hide the drawn cursor. Tells the
 // activity when the game wants text (it shows the keyboard), when the trinket inventory or the
 // provisions open or close (it shows the Shift button), when the party can walk (in a dungeon,
-// outside a battle: it shows the walk buttons), and when the game's Escape menu shows its main list
-// (it shows the controls card).
+// outside a battle: it shows the walk buttons), when the game's Escape menu shows its main list
+// (it shows the controls card), and which achievements the game reports done.
 // Game controllers: the activity's buttons and axes are passed on; whether one is connected is kept
 // here, so a game that connects later still learns of it.
 // Frame rate: a game frame is shown at most every `refreshes` display refreshes (1 = every one), and
@@ -53,11 +53,12 @@ static int cursor_visible = 1, cursor_w, cursor_h, cursor_hx, cursor_hy, cursor_
 static int cursor_shown = 1;       // the activity shows it (touch mode can hide it); drawn only if the game shows it too
 static unsigned char *cursor_pixels;
 
-// the activity, told when the game wants text (DD_TEXT_INPUT) and when the Shift button
-// (DD_SHIFT_SCREEN), the walk buttons (DD_WALK_SCREEN) and the controls card (DD_MENU_SCREEN) show
+// the activity, told when the game wants text (DD_TEXT_INPUT), when the Shift button
+// (DD_SHIFT_SCREEN), the walk buttons (DD_WALK_SCREEN) and the controls card (DD_MENU_SCREEN) show,
+// and of each achievement done (DD_ACHIEVEMENT)
 static JavaVM *vm;
 static jobject activity;
-static jmethodID on_text_input, on_shift_screen, on_walk_screen, on_menu_screen;
+static jmethodID on_text_input, on_shift_screen, on_walk_screen, on_menu_screen, on_achievement;
 
 // recent left clicks (cursor height and time), to tell the activity where the text field may be
 #define CLICKS    16
@@ -308,6 +309,21 @@ static void menu_screen(int on) {
         (*env)->CallVoidMethod(env, activity, on_menu_screen, (jboolean)on);
 }
 
+// DDActivity.onAchievement(id), from the render thread; the id is the packet after DD_ACHIEVEMENT
+static void achievement(int fd) {
+    char id[128];
+    ssize_t n = recv(fd, id, sizeof id - 1, 0);   // a longer packet is cut short
+    JNIEnv *env = java_env();
+    if (n <= 0 || !env)
+        return;
+    id[n] = 0;
+    jstring s = (*env)->NewStringUTF(env, id);
+    if (!s)
+        return;
+    (*env)->CallVoidMethod(env, activity, on_achievement, s);
+    (*env)->DeleteLocalRef(env, s);   // this thread stays attached: free it now
+}
+
 static void handle(int fd) {
     dd_msg m;
     int fence;
@@ -374,6 +390,9 @@ static void handle(int fd) {
         break;
     case DD_MENU_SCREEN:
         menu_screen(m.a != 0);
+        break;
+    case DD_ACHIEVEMENT:
+        achievement(fd);
         break;
     }
 }
@@ -467,6 +486,7 @@ Java_org_ddport_darkest_DDActivity_nativeStart(JNIEnv *env, jclass cls, jobject 
     on_shift_screen = (*env)->GetMethodID(env, cls, "onShiftScreen", "(Z)V");
     on_walk_screen = (*env)->GetMethodID(env, cls, "onWalkScreen", "(Z)V");
     on_menu_screen = (*env)->GetMethodID(env, cls, "onMenuScreen", "(Z)V");
+    on_achievement = (*env)->GetMethodID(env, cls, "onAchievement", "(Ljava/lang/String;)V");
     game_w = w;
     game_h = h;
     refreshes = frame_refreshes > 1 ? frame_refreshes : 1;

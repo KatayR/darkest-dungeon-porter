@@ -104,6 +104,13 @@ A **game controller** (Bluetooth or USB) works as on PC, with the game's own but
 
 When the game asks for text (naming the hamlet, renaming a hero), the on-screen keyboard opens and the game slides up so the field stays above it. Enter confirms. If Back hid the keyboard, a tap brings it back.
 
+## Achievements
+The game's DRM-free build still tracks its achievements, and the app shows them:
+- When one is done for the first time on the phone, a card at the top says so for five seconds. Taps go through it to the game.
+- While the game's Escape menu is open, an **Achievements** button in the top-right corner lists all 104, the base game's and each DLC's apart. **Close** or **Back** closes the list.
+- Like on Steam, each counts once per phone, whichever campaign earns it. The ones your saves already have (also saves imported from a PC) count without a pop-up when the game starts. The game doesn't keep the three party-wipe achievements in its saves, so those count from when they happen on the phone.
+- The names and descriptions come from the game's files. GOG build 26186 has none, so there each shows the name the game uses inside.
+
 ## Known limitations
 - The frame rates are exact only on 60 Hz and 120 Hz screens. Each game frame stays up for a whole number of refreshes (the refresh rate divided by the chosen rate, rounded), so on a 90 Hz screen "60" gives 45 FPS. The refresh rate is read once, when the game starts. Only 60 Hz has been tested.
 - Stay in the app while it imports the game. Android may stop the app in the background; an unfinished import is thrown away, and the next one starts over.
@@ -128,6 +135,7 @@ app process (Java + libddview.so)                     game process (libddhost.so
   - client-array draws that pass only the vertex range they use, which takes 1080p from about 45 to 60 FPS on Adreno;
   - a fix for a scissor/viewport cache bug.
 - **Frames:** the game renders into shared hardware buffers. The app shows them, and native fences keep the two processes in step without `glFinish`.
+- **Achievements:** for each finished achievement, the game asks its no-Steam platform layer whether that achievement exists, and the layer always says no. `libddglue.so` points that one entry of the layer's function table (in memory, never on disk) at the game's own `SDL_SetHint` import, which Box64 already routes to `libddglue.so`. That code tells the app and says yes. From there the game goes on as its Steam build does.
 
 The full development log, including measurements and dead ends, is in [`notes/todo.md`](notes/todo.md). Lessons learned are in [`notes/lessons.md`](notes/lessons.md). [`port/phone/`](port/phone) holds the first approach: a rooted phone with a Debian chroot and VirGL.
 

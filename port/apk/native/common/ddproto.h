@@ -38,6 +38,8 @@ enum {
                       // (arrow buttons up) / 0 it isn't
     DD_MENU_SCREEN,   // a=1 the game's Escape menu shows its main list (the controls card is up) / 0 it
                       // doesn't
+    DD_ACHIEVEMENT,   // a=length; followed by one packet of `a` bytes: the id of an achievement the game
+                      // reports as completed (no NUL). Loading a campaign reports all it has done.
 };
 
 typedef struct {

@@ -24,6 +24,8 @@
 //   and not in a battle; read from the game's memory the same way.
 // - Menu screen: the app shows its controls card (trackpad or touch) while the game's Escape menu
 //   shows its main list; read from the game's memory the same way.
+// - Achievements: the game's own tracker reports each completed achievement to this file, which tells
+//   the app (see "achievements").
 // - Entry points that would reach SDL's Java side on Android (joystick/haptic/sensor init, pref
 //   path, message box, URL, opening files).
 // Protocol: ../common/ddproto.h.
@@ -65,6 +67,7 @@ static struct {
     int (*InitSubSystem)(Uint32);
     SDL_Window *(*CreateWindow)(const char *, int, int, int, int, Uint32);
     int (*PollEvent)(SDL_Event *);
+    SDL_bool (*SetHint)(const char *, const char *);
 } real;
 
 static void init_real(void) {
@@ -78,7 +81,8 @@ static void init_real(void) {
     real.Init = dlsym(sdl, "SDL_Init");
     real.InitSubSystem = dlsym(sdl, "SDL_InitSubSystem");
     real.CreateWindow = dlsym(sdl, "SDL_CreateWindow");
-    real.PollEvent = dlsym(sdl, "SDL_PollEvent");
+    real.SetHint = dlsym(sdl, "SDL_SetHint");
+    real.PollEvent = dlsym(sdl, "SDL_PollEvent");   // last: init_real is done once it is set
 }
 
 // ---- connection to the app ----
@@ -473,8 +477,119 @@ static long code_offset(const unsigned char *f, const Elf64_Shdr *text, Elf64_Ad
     return offset;
 }
 
+// ---- achievements ----
+// The game's achievement tracker runs in this build too. For each completed achievement,
+// Achievements::Evaluate and EvaluateRetroactive ask the platform object
+// (UserServicesInterface::g_UserServicesInterface) HasAchievement(id), and only on yes call
+// SetAchievementCompleted(id) and stop checking that one. In this build that object is a
+// DefaultUserServices, whose HasAchievement says no, so nothing is ever reported (Steam builds say yes).
+// Its vtable slot for HasAchievement is pointed at the game's own SDL_SetHint@plt, which box64 bridges
+// to SDL_SetHint below with the same two pointer arguments; that one tells the app and says yes, so the
+// game goes on as on Steam (SetAchievementCompleted stays the empty stub). Only that pointer in the
+// game's memory changes: no game instruction, nothing on disk, nothing the game saves. Nothing but
+// those two functions calls the slot, and each only after Achievement::IsComplete (checked on GOG
+// 26186, GOG 27988 and Steam 28212). Loading a campaign reports everything it has done; the app keeps
+// those from popping up.
+#define HAS_ACHIEVEMENT_SLOT 0x30   // in the vtable: offset-to-top, typeinfo, then the slot at +0x20
+static void **user_services;   // &UserServicesInterface::g_UserServicesInterface; NULL: no achievements
+
+// the address of the game's PLT stub for its import `name` (the jmp through that import's GOT slot), or 0
+static Elf64_Addr plt_stub(const unsigned char *f, const Elf64_Shdr *sh, int count, const char *section_names,
+                           const char *name) {
+    const Elf64_Shdr *rela = NULL, *plt = NULL;
+    for (int i = 0; i < count; i++)
+        if (!strcmp(section_names + sh[i].sh_name, ".rela.plt"))
+            rela = &sh[i];
+        else if (!strcmp(section_names + sh[i].sh_name, ".plt"))
+            plt = &sh[i];
+    if (!rela || !plt)
+        return 0;
+    const Elf64_Shdr *dynsym = &sh[rela->sh_link];
+    const Elf64_Sym *sym = (const Elf64_Sym *)(f + dynsym->sh_offset);
+    const char *names = (const char *)f + sh[dynsym->sh_link].sh_offset;
+    const Elf64_Rela *r = (const Elf64_Rela *)(f + rela->sh_offset);
+    Elf64_Addr got = 0;
+    for (size_t i = 0; i < rela->sh_size / sizeof *r && !got; i++)
+        if (!strcmp(names + sym[ELF64_R_SYM(r[i].r_info)].st_name, name))
+            got = r[i].r_offset;
+    const unsigned char *code = f + plt->sh_offset;
+    for (size_t o = 0; got && o + 6 <= plt->sh_size; o++)   // jmp *rel32(%rip): ff 25 rel32
+        if (code[o] == 0xff && code[o + 1] == 0x25) {
+            int32_t rel;
+            memcpy(&rel, code + o + 2, sizeof rel);
+            if (plt->sh_addr + o + 6 + rel == got)
+                return plt->sh_addr + o;
+        }
+    return 0;
+}
+
+// the protection of the page holding addr in this process (PROT_* bits), or -1
+static int page_prot(uintptr_t addr) {
+    FILE *maps = fopen("/proc/self/maps", "re");
+    if (!maps)
+        return -1;
+    char line[512];
+    int prot = -1;
+    while (prot < 0 && fgets(line, sizeof line, maps)) {
+        unsigned long long start, end;
+        char perms[5];
+        if (sscanf(line, "%llx-%llx %4s", &start, &end, perms) == 3 && addr >= start && addr < end)
+            prot = (perms[0] == 'r' ? PROT_READ : 0) | (perms[1] == 'w' ? PROT_WRITE : 0) |
+                   (perms[2] == 'x' ? PROT_EXEC : 0);
+    }
+    fclose(maps);
+    return prot;
+}
+
+// points DefaultUserServices' HasAchievement slot at SDL_SetHint@plt, after checking that the slot and
+// the function in it are this build's "no" (xor %eax,%eax; ret)
+static void hook_achievements(Elf64_Addr vtable, Elf64_Addr has, Elf64_Addr services, Elf64_Addr hint_stub) {
+    static const unsigned char no[] = { 0x31, 0xc0, 0xc3 };
+    if (!vtable || !has || !services) {
+        LOG("no achievements: the game binary lacks their symbols");
+        return;
+    }
+    if (!hint_stub) {
+        LOG("no achievements: the game binary has no SDL_SetHint stub");
+        return;
+    }
+    Elf64_Addr *slot = (Elf64_Addr *)(vtable + HAS_ACHIEVEMENT_SLOT);
+    if (*slot != has || memcmp((const void *)has, no, sizeof no)) {
+        LOG("no achievements: this game build answers HasAchievement differently");
+        return;
+    }
+    long page_size = sysconf(_SC_PAGESIZE);
+    void *page = (void *)((uintptr_t)slot & ~(uintptr_t)(page_size - 1));
+    int prot = page_prot((uintptr_t)slot);
+    if (prot < 0 || mprotect(page, page_size, prot | PROT_WRITE) != 0) {
+        LOG("no achievements: cannot write the game's vtable: %s", prot < 0 ? "not mapped" : strerror(errno));
+        return;
+    }
+    user_services = (void **)services;   // before the slot, so the first call is already recognised
+    *slot = hint_stub;
+    mprotect(page, page_size, prot);
+    LOG("achievements: DefaultUserServices::HasAchievement (slot at 0x%llx) now reaches SDL_SetHint@plt at "
+        "0x%llx; the services object is at 0x%llx", (unsigned long long)(uintptr_t)slot,
+        (unsigned long long)hint_stub, (unsigned long long)services);
+}
+
+// HasAchievement(services, id) arrives here (see above); anything else goes on to SDL
+SDL_bool SDL_SetHint(const char *name, const char *value) {
+    if (user_services && name && (const void *)name == *user_services) {
+        size_t n = value ? strnlen(value, 127) : 0;
+        if (n) {
+            LOG("achievement done: %.*s", (int)n, value);
+            send_msg(DD_ACHIEVEMENT, (int)n, 0, 0, 0);
+            send(sock, value, n, MSG_NOSIGNAL);
+        }
+        return SDL_TRUE;
+    }
+    init_real();
+    return real.SetHint(name, value);
+}
+
 // finds TownDisplay::s_Instance, Raid::s_Instance, LoadingScreen::s_Instance and the screens' s_Instance
-// in the game binary's symbols and reads the offsets above from the game's code
+// in the game binary's symbols and reads the offsets above from the game's code; hooks the achievements
 static void find_game_state(void) {
     const char *base = getenv("DD_BASE_PATH");
     char path[1024];
@@ -482,7 +597,7 @@ static void find_game_state(void) {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
     struct stat st;
     if (fd < 0 || fstat(fd, &st) != 0) {
-        LOG("no Shift or walk buttons or controls card: cannot open %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons, controls card or achievements: cannot open %s: %s", path, strerror(errno));
         if (fd >= 0)
             close(fd);
         return;
@@ -490,7 +605,7 @@ static void find_game_state(void) {
     const unsigned char *f = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
     close(fd);
     if (f == MAP_FAILED) {
-        LOG("no Shift or walk buttons or controls card: cannot map %s: %s", path, strerror(errno));
+        LOG("no Shift or walk buttons, controls card or achievements: cannot map %s: %s", path, strerror(errno));
         return;
     }
     // box64 runs this very file, so it is a valid ELF
@@ -506,7 +621,8 @@ static void find_game_state(void) {
     Elf64_Addr past_start = 0, to_string = 0, dialog_instance = 0, in_queue = 0, push_entry = 0, done_loading = 0,
                to_hamlet = 0;
     Elf64_Addr instance = 0, visible = 0, provisions_visible = 0, active = 0, raid_instance = 0, in_battle = 0, battle_state = 0,
-               loading_instance = 0, loading_active = 0, menu_active = 0, child_page = 0;
+               loading_instance = 0, loading_active = 0, menu_active = 0, child_page = 0, services_vtable = 0,
+               has_achievement = 0, services = 0;
     // the screens with an Escape menu, in the order of screens[]
     static const char *const screen_names[] = {
         "_ZN6TownUI6Screen11TownDisplay10s_InstanceE", "_ZN6RaidUI6Screen11RaidDisplay10s_InstanceE",
@@ -559,6 +675,12 @@ static void find_game_state(void) {
                 in_queue = sym[i].st_value;
             else if (!strcmp(s, "_ZN13ConfirmDialog6System17PushEntryInternalERKNS_15EntryParametersE"))
                 push_entry = sym[i].st_value;
+            else if (!strcmp(s, "_ZTV19DefaultUserServices"))
+                services_vtable = sym[i].st_value;
+            else if (!strcmp(s, "_ZNK19DefaultUserServices14HasAchievementEPKc"))
+                has_achievement = sym[i].st_value;
+            else if (!strcmp(s, "_ZN21UserServicesInterface23g_UserServicesInterfaceE"))
+                services = sym[i].st_value;
         }
     }
     // the instructions that read the state, with 27988's offsets (any offset matches)
@@ -695,6 +817,8 @@ static void find_game_state(void) {
             (unsigned long long)screen_instance[2], (unsigned long long)screen_instance[3],
             (unsigned long long)screen_instance[4], (unsigned long long)screen_instance[5], menu, panel_state, page);
     }
+    hook_achievements(services_vtable, has_achievement, services,
+                      plt_stub(f, sh, eh->e_shnum, section_names, "SDL_SetHint"));
     munmap((void *)f, st.st_size);
 }
 

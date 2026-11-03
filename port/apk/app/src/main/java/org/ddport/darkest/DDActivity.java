@@ -88,6 +88,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -134,6 +135,8 @@ import org.w3c.dom.Node;
  * provisions are open, a Shift button holds Shift, which makes a click sell the trinket; anywhere,
  * zoom in shows it and zoom out hides it. In a dungeon outside a battle, two
  * arrow buttons hold Left or Right, which walks the party.
+ * When the game finds an achievement done for the first time on this phone, a card says so for a few
+ * seconds; the Escape menu also gets an Achievements button, which lists them all (see Achievements).
  * Four fingers held share the logs (see sendLogs).
  */
 public class DDActivity extends Activity implements SurfaceHolder.Callback {
@@ -206,6 +209,16 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
     private Button trackpadButton, touchButton, holdButton, twoFingerButton;   // on the card: chosen ones amber
     private View touchOptions;  // on the card in touch mode: the cursor and how to right-click
     private TextView rightClickNote;   // under it: the chosen way's pros and cons
+    private Achievements achievements;   // null until the game starts
+    private View achievementsButton;   // with the controls card: opens the list
+    private View achievementsList;     // over the game and its menu while open (see showAchievements)
+    private LinearLayout achievementRows;
+    private TextView achievementsCount;
+    private boolean backClosedList;    // Back went down to close the list: its release isn't the game's
+    private View popup;                // over the game for a few seconds per new achievement (see onAchievement)
+    private TextView popupTitle, popupDescription;
+    private final ArrayDeque<String[]> popups = new ArrayDeque<>();   // title and description, waiting their turn
+    private static final long POPUP_MS = 5000;
 
     /** The launch screen's pages: the hub, and the page each of its rows opens. */
     private enum Page { HUB, GAME_FILES, MODS, SAVE_FILE, DISPLAY }
@@ -959,12 +972,17 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         view.getHolder().setFixedSize(gameW, gameH);
         view.getHolder().addCallback(this);
         view.setOnTouchListener((v, e) -> onTouch(e));
+        achievements = new Achievements(prefs, new File(gameDir(), "localization/achievements.string_table.xml"));
+        achievements.addSaves(savesDir());   // done before: loading a campaign reports them again
         FrameLayout layout = new FrameLayout(this);
         layout.addView(view);
         layout.addView(shiftButton());   // over the game, not moved by panAboveKeyboard
         layout.addView(walkLeft = walkButton("◀︎", KeyEvent.KEYCODE_DPAD_LEFT, Gravity.START));
         layout.addView(walkRight = walkButton("▶︎", KeyEvent.KEYCODE_DPAD_RIGHT, Gravity.END));
         layout.addView(controlsCard());
+        layout.addView(achievementsButton());
+        layout.addView(achievementsList());
+        layout.addView(popup());
         setContentView(layout);
         // the keyboard (and the bars that may show with it) cover the game rather than resizing it;
         // panAboveKeyboard moves it instead
@@ -1366,6 +1384,11 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         }
         if (padKey(keyCode, event, true))
             return true;
+        if (keyCode == KeyEvent.KEYCODE_BACK && achievementsList.getVisibility() == View.VISIBLE) {
+            achievementsList.setVisibility(View.GONE);   // the list closes; the game's menu stays
+            backClosedList = true;
+            return true;
+        }
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (event.getRepeatCount() == 0)   // a held Back must not toggle the menu over and over
                 nativeKey(SCANCODE_ESCAPE, true);
@@ -1389,7 +1412,9 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
         if (padKey(keyCode, event, false))
             return true;
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            nativeKey(SCANCODE_ESCAPE, false);
+            if (!backClosedList)
+                nativeKey(SCANCODE_ESCAPE, false);
+            backClosedList = false;
             return true;
         }
         if (typesText(event))
@@ -1721,7 +1746,140 @@ public class DDActivity extends Activity implements SurfaceHolder.Callback {
 
     /** Called by ddview (on its render thread) when the game's Escape menu starts or stops showing its main list. */
     private void onMenuScreen(boolean on) {
-        handler.post(() -> controlsCard.setVisibility(on ? View.VISIBLE : View.GONE));
+        handler.post(() -> {
+            controlsCard.setVisibility(on ? View.VISIBLE : View.GONE);
+            achievementsButton.setVisibility(on ? View.VISIBLE : View.GONE);
+            if (!on)
+                achievementsList.setVisibility(View.GONE);
+        });
+    }
+
+    /** The Escape menu's Achievements button, top right; like the controls card, it never takes focus. */
+    private View achievementsButton() {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        Button b = controlsButton(c, "Achievements", v -> showAchievements());
+        b.setVisibility(View.GONE);
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
+        lp.rightMargin = lp.topMargin = dp(c, 32);
+        b.setLayoutParams(lp);
+        return achievementsButton = b;
+    }
+
+    /**
+     * The list of all achievements, over the game and its menu: a card with the count done and a Close
+     * button, and the achievements by game and DLC, each with its description, done ones ticked. It
+     * keeps every touch; Back and the menu closing close it too.
+     */
+    private View achievementsList() {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        FrameLayout shade = new FrameLayout(c);
+        shade.setBackgroundColor(0xB0000000);
+        shade.setClickable(true);   // touches beside the card don't reach the game
+        shade.setVisibility(View.GONE);
+        LinearLayout card = card(c);
+        card.setBackground(rounded(c));
+        LinearLayout top = new LinearLayout(c);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout titles = new LinearLayout(c);
+        titles.setOrientation(LinearLayout.VERTICAL);
+        titles.addView(heading(c, "Achievements"));
+        titles.addView(achievementsCount = text(c, "", 14, MUTED));
+        top.addView(titles, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+        top.addView(controlsButton(c, "Close", v -> shade.setVisibility(View.GONE)));
+        card.addView(top, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        ScrollView scroll = new ScrollView(c);
+        scroll.setFocusable(false);
+        achievementRows = new LinearLayout(c);
+        achievementRows.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(achievementRows);
+        LinearLayout.LayoutParams scrollLp = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1);
+        scrollLp.topMargin = dp(c, 8);
+        card.addView(scroll, scrollLp);
+        int width = Math.min(dp(c, 640), getResources().getDisplayMetrics().widthPixels - dp(c, 32));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(width, FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = lp.bottomMargin = dp(c, 16);
+        shade.addView(card, lp);
+        return achievementsList = shade;
+    }
+
+    /** Fills the list from what is done now and opens it at the top. */
+    private void showAchievements() {
+        Context c = achievementRows.getContext();
+        achievementRows.removeAllViews();
+        String section = null;
+        for (Achievements.Entry e : achievements.list()) {
+            if (!e.section.equals(section)) {
+                section = e.section;
+                TextView heading = text(c, section, 14, ACCENT);
+                heading.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+                achievementRows.addView(heading, below(c, achievementRows.getChildCount() == 0 ? 4 : 16));
+            }
+            LinearLayout row = new LinearLayout(c);
+            TextView mark = text(c, e.done ? "✓" : "", 16, ACCENT);
+            mark.setWidth(dp(c, 24));
+            row.addView(mark);
+            LinearLayout words = new LinearLayout(c);
+            words.setOrientation(LinearLayout.VERTICAL);
+            words.addView(text(c, e.title, 16, e.done ? TEXT : MUTED));
+            if (!e.description.isEmpty())
+                words.addView(text(c, e.description, 14, MUTED));
+            row.addView(words);
+            achievementRows.addView(row, below(c, 8));
+        }
+        achievementsCount.setText(achievements.doneCount() + " of " + Achievements.COUNT + " done");
+        ((ScrollView) achievementRows.getParent()).scrollTo(0, 0);
+        achievementsList.setVisibility(View.VISIBLE);
+    }
+
+    /** The card that tells of a new achievement: top middle, over everything; taps go through it to the game. */
+    private View popup() {
+        Context c = new ContextThemeWrapper(this, android.R.style.Theme_DeviceDefault);
+        LinearLayout card = card(c);
+        card.setBackground(rounded(c));
+        card.setVisibility(View.GONE);
+        card.addView(text(c, "Achievement unlocked", 14, ACCENT));
+        card.addView(popupTitle = heading(c, ""));
+        card.addView(popupDescription = text(c, "", 14, MUTED));
+        popupTitle.setMaxWidth(dp(c, 480));
+        popupDescription.setMaxWidth(dp(c, 480));
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        lp.topMargin = dp(c, 16);
+        card.setLayoutParams(lp);
+        return popup = card;
+    }
+
+    /**
+     * Called by ddview (on its render thread) for each achievement the game reports done. One done
+     * before (in any campaign, or in the saves when the game started) is ignored; a new one pops up,
+     * after any still waiting.
+     */
+    private void onAchievement(String id) {
+        handler.post(() -> {
+            String[] shown = achievements.reported(id);
+            if (shown == null)
+                return;
+            Log.i(TAG, "achievement unlocked: " + id);
+            popups.add(shown);
+            if (popup.getVisibility() != View.VISIBLE)
+                showNextPopup();
+        });
+    }
+
+    private void showNextPopup() {
+        String[] next = popups.poll();
+        if (next == null) {
+            popup.setVisibility(View.GONE);
+            return;
+        }
+        popupTitle.setText(next[0]);
+        popupDescription.setText(next[1]);
+        popupDescription.setVisibility(next[1].isEmpty() ? View.GONE : View.VISIBLE);
+        popup.setVisibility(View.VISIBLE);
+        handler.postDelayed(this::showNextPopup, POPUP_MS);
     }
 
     /** The game's view, and the text field the on-screen keyboard types into. */

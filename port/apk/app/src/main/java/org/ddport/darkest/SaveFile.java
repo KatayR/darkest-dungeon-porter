@@ -80,6 +80,12 @@ final class SaveFile {
         return v == null || align(v[0]) + 4 > v[1] ? otherwise : b.getInt(align(v[0]));
     }
 
+    /** The bool at `path` (one byte, not aligned), or false if there is none. */
+    boolean flag(String path) {
+        int[] v = values.get(path);
+        return v != null && v[0] < v[1] && b.get(v[0]) != 0;
+    }
+
     /** The float at `path`, or `otherwise`. */
     float decimal(String path, float otherwise) {
         int[] v = values.get(path);
