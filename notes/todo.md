@@ -1615,3 +1615,11 @@ The game checks 145 launch options in all, in Steam 28212: `Darkest::ParseArgume
   - [x] The player on the Moto g54 (only that phone has the real driver without the extension): the test APK below worked (reported by the owner, 2026-10-30).
 - Test APK for the player: `Desktop/darkest-dungeon-porter-0.6.1-powervr-3d-fix.apk`, 0.6.1 (versionCode 18, installs over their 0.6.0) plus this fix, from the committed natives build. Signed with the upload key (`963301da…3196934`, checked with `apksigner`); its `libGL.so` is byte-identical to the debug APK tested on the A34. Not committed yet.
 - [x] Released as 0.6.2 (versionCode 19, tag on `90ac792`), signed with the upload key (`963301da…3196934`, checked with `apksigner`), with `get-steam-game.bat`, `get-saves.bat` and `get-steam-mods.bat`; the downloaded APK matches the signed one. Its gl4es patches are the ones the player's test APK was built from. Not run on a phone as a release build (the A34 has a debug build).
+
+## Crash leaving the dungeon with an old save on GOG 27760 (2026-11-02)
+
+**Report:** on 0.6.2, a moto g34 5G (Adreno, Android 15) closed the game on the loading screen every time the party left a dungeon. The save came from an earlier game build. The player then got GOG build 27760, installed it fresh and carried the old save over. With a new campaign it no longer crashes. The save is gone, so this can't be reproduced.
+
+**Findings:** the shared logs come from a later launch and stop about 23 s in, before any dungeon, so they don't show the crash. On 27760, a build the port wasn't checked on, the glue found every symbol and offset (`Raid::s_Instance` 0x37b3060, battle +0x4778, state +0x248; `LoadingScreen::s_Instance` 0x38aae58, flag +0x2cc; the town and Escape-menu ones too). They're checked against the build's own instructions. A fault in the glue would also crash a new campaign. Most likely cause: the game didn't handle a save from another build when the raid ended.
+
+- [x] Closed: nothing to change in the port. If it comes back on a new campaign, ask for logs taken right after the crash.
