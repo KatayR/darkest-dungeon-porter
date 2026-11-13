@@ -91,6 +91,8 @@ exit /b 0
 
 rem :depot ID NAME: asks the running Steam to download a depot and waits for the result in its log.
 rem Only log lines after the ones already there count. errorlevel 1 and REASON when Steam refuses.
+rem The last depot line so far is numbered by findstr, like the new ones: find /c counts each NUL
+rem byte as a line, and a crash can leave thousands of NULs in Steam's log, so its count was too high.
 :depot
 set "ID=%~1"
 set "REASON="
@@ -98,7 +100,7 @@ set "STARTED="
 set "SKIP=0"
 set "TICKS=0"
 echo - %~2 (depot %~1)
-if exist "%LOG%" for /f %%n in ('type "%LOG%" ^| "%FIND%" /c /v ""') do set "SKIP=%%n"
+for /f "delims=:" %%n in ('findstr /n /c:"Downloading depot " /c:"Depot download " "%LOG%" 2^>nul') do set "SKIP=%%n"
 start "" "%STEAMEXE%" +download_depot %APP% %ID%
 :depot_wait
 ping -n 2 127.0.0.1 >nul

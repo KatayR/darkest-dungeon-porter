@@ -153,14 +153,15 @@ exit /b 0
 
 rem :item ID: asks the running Steam to download a Workshop item and waits for the result in its log,
 rem then lists the item's folder for the zip. Only log lines after the ones already there count.
-rem ERRMSG when Steam doesn't answer.
+rem ERRMSG when Steam doesn't answer. The last item line so far is numbered by findstr, like the new
+rem ones: find /c counts each NUL byte as a line, and a crash can leave NULs in Steam's log.
 :item
 set "ID=%~1"
 set "RESULT="
 set "STARTED="
 set "SKIP=0"
 set "TICKS=0"
-if exist "%LOG%" for /f %%n in ('type "%LOG%" ^| "%FIND%" /c /v ""') do set "SKIP=%%n"
+for /f "delims=:" %%n in ('findstr /n /c:"Download item " "%LOG%" 2^>nul') do set "SKIP=%%n"
 start "" "%STEAMEXE%" +workshop_download_item %APP% %ID%
 :item_wait
 ping -n 2 127.0.0.1 >nul
